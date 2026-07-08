@@ -1,0 +1,3 @@
+---
+# Rendered into /etc/docker/daemon.json when non-empty (opt-in).
+docker_daemon_json: {}

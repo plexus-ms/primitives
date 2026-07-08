@@ -1,0 +1,70 @@
+---
+- name: "{{ app.name }} | resolve app dir"
+  ansible.builtin.set_fact:
+    app_dir: "{{ plexus_root }}/{{ app.name }}"
+
+- name: "{{ app.name }} | create app dir"
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0750"
+
+# compose.yml + mise.toml come from this monorepo's apps/<name>/ (single source
+# of truth) — the operator's checkout is the reproducible reference.
+- name: "{{ app.name }} | place deploy artifacts from the repo"
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../apps/{{ app.name }}/{{ item }}"
+    dest: "{{ app_dir }}/{{ item }}"
+    owner: "{{ deploy_user }}"
+    mode: "0644"
+  loop:
+    - compose.yml
+    - mise.toml
+  loop_control:
+    label: "{{ item }}"
+
+# Restore baseline: only seed IMAGE when absent so a live CI deploy is never clobbered.
+- name: "{{ app.name }} | seed .env with the restore image"
+  ansible.builtin.copy:
+    dest: "{{ app_dir }}/.env"
+    content: "IMAGE={{ app.image }}\n"
+    owner: "{{ deploy_user }}"
+    mode: "0640"
+    force: false
+
+# Only needed for PRIVATE images. Public package → skip (recommended for a public site).
+- name: "{{ app.name }} | log in to GHCR as the deploy user"
+  ansible.builtin.command:
+    cmd: "docker login ghcr.io -u {{ ghcr_user }} --password-stdin"
+    stdin: "{{ ghcr_token }}"
+  become_user: "{{ deploy_user }}"
+  when: ghcr_token | length > 0
+  no_log: true
+  changed_when: false
+
+# Runs as the deploy user so a private registry works: that's where the GHCR
+# login above put the credentials, and it's the same user the CI deploy verb
+# uses — provisioning and deploys pull with one identity.
+- name: "{{ app.name }} | pull + start"
+  when: app_deploy | bool
+  become_user: "{{ deploy_user }}"
+  block:
+    - name: "{{ app.name }} | docker compose pull"
+      ansible.builtin.command:
+        cmd: docker compose pull
+        chdir: "{{ app_dir }}"
+      changed_when: false
+    - name: "{{ app.name }} | docker compose up -d"
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ app_dir }}"
+      register: compose_up
+      changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"
+  rescue:
+    - name: "{{ app.name }} | image not pullable yet (expected before first CI push)"
+      ansible.builtin.debug:
+        msg: >-
+          {{ app.name }}: image {{ app.image }} not available yet.
+          Host is provisioned; run the CI deploy (or push to main) to bring it up.

@@ -1,0 +1,127 @@
+// ========================= METRICS: System =========================
+
+prometheus.exporter.unix "node" { }
+
+prometheus.scrape "node" {
+  targets    = prometheus.exporter.unix.node.targets
+  forward_to = [prometheus.relabel.instance.receiver]
+  scrape_interval = "60s"
+}
+
+// ========================= METRICS: Containers =========================
+
+prometheus.exporter.cadvisor "containers" {
+  docker_host = "unix:///var/run/docker.sock"
+}
+
+prometheus.scrape "containers" {
+  targets    = prometheus.exporter.cadvisor.containers.targets
+  forward_to = [prometheus.relabel.instance.receiver]
+  scrape_interval = "60s"
+}
+
+// ========================= METRICS: Applications =========================
+{% for target in alloy_scrape_targets %}
+
+prometheus.scrape "{{ target.name }}" {
+  targets = [
+    {__address__ = "{{ target.address }}"},
+  ]
+  forward_to = [prometheus.relabel.instance.receiver]
+{% if target.metrics_path is defined %}
+  metrics_path = "{{ target.metrics_path }}"
+{% endif %}
+  scrape_interval = "60s"
+}
+{% endfor %}
+
+// ========================= LOGS: Containers =========================
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+loki.relabel "docker_labels" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  forward_to    = [loki.relabel.instance.receiver]
+  relabel_rules = loki.relabel.docker_labels.rules
+}
+
+// ========================= LOGS: Journal =========================
+
+loki.relabel "journal_labels" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+}
+
+loki.source.journal "journal" {
+  forward_to    = [loki.relabel.instance.receiver]
+  relabel_rules = loki.relabel.journal_labels.rules
+}
+
+// ========================= REMOTE WRITE =========================
+
+prometheus.relabel "instance" {
+  forward_to = [prometheus.remote_write.remote.receiver]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "project"
+    replacement  = "{{ alloy_project }}"
+  }
+}
+
+loki.relabel "instance" {
+  forward_to = [loki.write.remote.receiver]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "project"
+    replacement  = "{{ alloy_project }}"
+  }
+}
+
+prometheus.remote_write "remote" {
+  endpoint {
+    url = "{{ alloy_prometheus_remote_write_url }}"
+
+    basic_auth {
+      username = "{{ alloy_basicauth_username }}"
+      password = "{{ alloy_basicauth_password }}"
+    }
+  }
+}
+
+loki.write "remote" {
+  endpoint {
+    url = "{{ alloy_loki_push_url }}"
+
+    basic_auth {
+      username = "{{ alloy_basicauth_username }}"
+      password = "{{ alloy_basicauth_password }}"
+    }
+  }
+}

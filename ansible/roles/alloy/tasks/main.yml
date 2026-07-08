@@ -1,0 +1,40 @@
+---
+# Run AFTER the docker role: the alloy user joins the docker group to read
+# container logs and the Docker socket (cAdvisor, log discovery).
+- name: Add Grafana apt repository
+  ansible.builtin.deb822_repository:
+    name: grafana
+    types: deb
+    uris: https://apt.grafana.com
+    suites: stable
+    components: main
+    signed_by: https://apt.grafana.com/gpg.key
+    state: present
+
+- name: Install Alloy
+  ansible.builtin.apt:
+    name: alloy
+    state: present
+    update_cache: true
+
+- name: Grant alloy read access to the journal and the Docker socket
+  ansible.builtin.user:
+    name: alloy
+    groups: [adm, systemd-journal, docker]
+    append: true
+  notify: Restart alloy
+
+- name: Configure Alloy
+  ansible.builtin.template:
+    src: "{{ alloy_config_template }}"
+    dest: /etc/alloy/config.alloy
+    owner: alloy
+    group: alloy
+    mode: "0600"
+  notify: Reload alloy
+
+- name: Enable and start Alloy
+  ansible.builtin.systemd_service:
+    name: alloy
+    state: started
+    enabled: true

@@ -1,0 +1,87 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+
+- name: Set timezone to UTC
+  community.general.timezone:
+    name: Etc/UTC
+
+# ── unprivileged deploy user ────────────────────────────────────────────────
+- name: Create the deploy user
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    shell: /bin/bash
+    create_home: true
+
+- name: Authorize the deploy key (CI runs the deploy verb as this user)
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user }}"
+    key: "{{ deploy_authorized_key }}"
+    state: present
+    exclusive: true
+  when: deploy_authorized_key | length > 0
+
+- name: Keep the operator key on root for break-glass access
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ operator_authorized_key }}"
+    state: present
+  when: operator_authorized_key | length > 0
+
+# ── SSH hardening (key-only) ────────────────────────────────────────────────
+- name: Harden sshd
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    validate: "sshd -t -f %s"
+  loop:
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+  notify: Restart ssh
+
+# ── firewall ────────────────────────────────────────────────────────────────
+- name: Allow SSH/HTTP/HTTPS through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["22", "80", "443"]
+
+- name: Default-deny inbound and enable ufw
+  community.general.ufw:
+    state: enabled
+    default: deny
+    direction: incoming
+
+# ── unattended security upgrades ────────────────────────────────────────────
+- name: Enable unattended-upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# ── mise (the deploy verb runs `mise migrate` on the host) ──────────────────
+- name: Install mise (single static binary, system-wide)
+  ansible.builtin.get_url:
+    url: https://mise.run
+    dest: /tmp/mise-install.sh
+    mode: "0755"
+  changed_when: false
+
+- name: Run the mise installer
+  ansible.builtin.command: /tmp/mise-install.sh
+  args:
+    creates: /usr/local/bin/mise
+  environment:
+    MISE_INSTALL_PATH: /usr/local/bin/mise
+    MISE_VERSION: v2026.6.14

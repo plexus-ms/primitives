@@ -1,0 +1,33 @@
+---
+# deb822_repository fetches and stores the signing key itself (needs
+# python3-debian on the host — in base_packages). It does NOT refresh the apt
+# cache; the install task below does, via update_cache.
+- name: Add Caddy apt repository
+  ansible.builtin.deb822_repository:
+    name: caddy
+    types: deb
+    uris: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+    suites: any-version
+    components: main
+    signed_by: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    state: present
+
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+
+- name: Configure Caddy (reverse proxy + automatic HTTPS)
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    mode: "0644"
+    validate: "caddy validate --config %s --adapter caddyfile"
+  notify: Reload caddy
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: started
+    enabled: true

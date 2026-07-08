@@ -1,0 +1,12 @@
+---
+# Restart (not reload) after group changes — the process must re-open the
+# journal and Docker socket with its new group memberships.
+- name: Restart alloy
+  ansible.builtin.systemd_service:
+    name: alloy
+    state: restarted
+
+- name: Reload alloy
+  ansible.builtin.systemd_service:
+    name: alloy
+    state: reloaded

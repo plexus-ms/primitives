@@ -1,0 +1,59 @@
+---
+- name: Remove conflicting distro Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-compose-v2
+      - docker-doc
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+
+# deb822_repository fetches and stores the signing key itself (needs
+# python3-debian on the host — in base_packages). It does NOT refresh the apt
+# cache; the install task below does, via update_cache.
+- name: Add Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/{{ ansible_distribution | lower }}
+    suites: "{{ ansible_distribution_release }}"
+    components: stable
+    architectures: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+    signed_by: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+    state: present
+
+- name: Install Docker engine + compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+# Opt-in: a tenant that needs daemon-level config (log driver, registries, …)
+# sets docker_daemon_json in group_vars. Empty default = file untouched.
+- name: Configure the Docker daemon
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_daemon_json | to_nice_json }}\n"
+    mode: "0644"
+  when: docker_daemon_json | length > 0
+  notify: Restart docker
+
+- name: Enable and start Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Add the deploy user to the docker group
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    groups: docker
+    append: true
