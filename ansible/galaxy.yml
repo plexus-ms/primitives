@@ -1,10 +1,10 @@
-namespace: plexus_ms          # collection namespaces forbid hyphens — this is NOT a typo of the org name
+namespace: plexus             # not "plexus-ms": collection namespaces forbid hyphens
 name: itops
-version: 1.0.1                # bump on EVERY change under ansible/ — SCM installs record this
+version: 2.0.0                # bump on EVERY change under ansible/ — SCM installs record this
                               # version, so a moved git tag alone is a silent no-op on reinstall
 readme: README.md
 authors:
-  - David Albers
+  - David Julian Albers
 description: >-
   Shared Plexus tenant-host roles: base hardening, Docker engine + compose,
   Caddy ingress, per-app deploy, Grafana Alloy observability agent.
