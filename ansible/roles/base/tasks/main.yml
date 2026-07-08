@@ -71,12 +71,16 @@
       APT::Periodic::Unattended-Upgrade "1";
 
 # ── mise (the deploy verb runs `mise migrate` on the host) ──────────────────
+# check_mode: false — get_url probes with a HEAD request in check mode and
+# mise.run answers HEAD with 405. The download is changed_when: false and the
+# installer below is guarded by creates:, so running it for real is harmless.
 - name: Install mise (single static binary, system-wide)
   ansible.builtin.get_url:
     url: https://mise.run
     dest: /tmp/mise-install.sh
     mode: "0755"
   changed_when: false
+  check_mode: false
 
 - name: Run the mise installer
   ansible.builtin.command: /tmp/mise-install.sh
