@@ -34,6 +34,23 @@
     mode: "0640"
     force: false
 
+# Substance stays on the host: per-app secrets from the tenant's `app.secrets` dict
+# (fed from 1Password via `op run`), injected into the container by the app's compose
+# `env_file`. Ownership is deliberately split — the deploy verb owns and clobbers
+# .env, provisioning owns secrets.env, and neither ever writes the other's file.
+- name: "{{ app.name }} | place secrets.env"
+  ansible.builtin.copy:
+    dest: "{{ app_dir }}/secrets.env"
+    content: |
+      {% for key, value in app.secrets.items() %}
+      {{ key }}={{ value }}
+      {% endfor %}
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+  when: app.secrets is defined
+  no_log: true
+
 # Only needed for PRIVATE images. Public package → skip (recommended for a public site).
 - name: "{{ app.name }} | log in to GHCR as the deploy user"
   ansible.builtin.command:
