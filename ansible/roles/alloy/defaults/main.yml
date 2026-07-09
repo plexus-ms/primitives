@@ -12,6 +12,6 @@ alloy_project: ""
 # Extra app scrape targets: [{name, address, metrics_path (optional)}]
 alloy_scrape_targets: []
 
-# Override slot (PLEXUS.md §6 edge-override pattern): a tenant-provided
+# Override slot (§ 8 PLX edge-override pattern): a tenant-provided
 # template replaces the stock pipeline wholesale.
 alloy_config_template: config.alloy.j2

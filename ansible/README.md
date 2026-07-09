@@ -1,7 +1,7 @@
 # plexus.itops — the shared Plexus tenant-host roles
 
 The Ansible collection every Plexus tenant playbook binds to its own inventory
-(PLEXUS.md §5). Note the namespace is `plexus`, not `plexus-ms` — collection
+(§ 7 PLX). Note the namespace is `plexus`, not `plexus-ms` — collection
 namespaces forbid hyphens, so it deliberately differs from the GitHub org
 spelling; do not "fix" it.
 
@@ -40,7 +40,7 @@ automatically.
 
 - **Layout contract:** the `deploy` role copies deploy artifacts from
   `{{ playbook_dir }}/../apps/<name>/` — it assumes the standard tenant-monorepo
-  shape (`infra/` beside `apps/`, PLEXUS.md §3.4).
+  shape (`infra/` beside `apps/`, § 4.3 PLX).
 - **All tenant substance is parameters.** Roles read only group_vars/inventory
   variables (`tenant`, `deploy_user`, `apps`, `base_packages`, `plexus_root`,
   `app_deploy`) and run-time env-injected secrets (`deploy_authorized_key`,
