@@ -10,7 +10,7 @@ spelling; do not "fix" it.
 | `plexus.itops.base` | Hardening: deploy user + authorized keys, key-only SSH, ufw (22/80/443), fail2ban, unattended-upgrades, mise. |
 | `plexus.itops.docker` | Docker engine + compose plugin (deb822 repo, conflicting distro packages removed); deploy user in the `docker` group; opt-in `docker_daemon_json`. |
 | `plexus.itops.caddy` | Caddy ingress with automatic HTTPS, reverse-proxying the `apps` list. |
-| `plexus.itops.deploy` | Per app: place `compose.yml` + `mise.toml`, seed `.env` (restore baseline), GHCR login, pull + start as the deploy user. |
+| `plexus.itops.deploy` | Per app: place `compose.yml`, seed `.env` (restore baseline), GHCR login, pull + start as the deploy user. |
 | `plexus.itops.alloy` | Grafana Alloy agent: node + cAdvisor metrics, Docker/journal logs, Prometheus remote_write + Loki push, `instance`/`project` labels. Run it **after** `docker` (joins the `docker` group). Not yet wired into the standard `site.yml` (doctrine Phase 3). |
 
 ## Consumption

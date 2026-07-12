@@ -11,8 +11,10 @@
     group: "{{ deploy_user }}"
     mode: "0750"
 
-# compose.yml + mise.toml come from this monorepo's apps/<name>/ (single source
-# of truth) — the operator's checkout is the reproducible reference.
+# compose.yml comes from this monorepo's apps/<name>/ (single source of
+# truth) — the operator's checkout is the reproducible reference. It is the
+# app's entire host-side surface: services, healthcheck, and (for stateful
+# apps) the one-shot migrate service the deploy verb invokes.
 - name: "{{ app.name }} | place deploy artifacts from the repo"
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../apps/{{ app.name }}/{{ item }}"
@@ -21,7 +23,6 @@
     mode: "0644"
   loop:
     - compose.yml
-    - mise.toml
   loop_control:
     label: "{{ item }}"
 
