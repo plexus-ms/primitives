@@ -1,7 +1,7 @@
 {
   "name": "@plexus-ms/config",
   "version": "0.2.0",
-  "description": "Shared tool configurations for Plexus repos — each an extend-in-one-line subpath export (§ 9 PLX).",
+  "description": "Shared, extendable tool configurations",
   "license": "GPL-3.0-or-later",
   "files": [
     "biome.json",
