@@ -1,8 +1,11 @@
-# Managed by Ansible (plexus/infra). Caddy obtains + renews Let's Encrypt certs
+# Managed by Ansible (plexus.platform). Caddy obtains + renews Let's Encrypt certs
 # automatically for each domain below (needs DNS → this host and ports 80/443 open).
 {% for app in plexus_apps %}
 {{ app.domain }} {
 	encode zstd gzip
+	# /healthz is readiness for the deploy verb, probed on the host; publicly it
+	# would be a dependency-status oracle, so the proxy refuses it (§ 7.1 PLX).
+	respond /healthz 403
 	reverse_proxy 127.0.0.1:{{ app.port }}
 }
 {% endfor %}

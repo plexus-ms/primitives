@@ -1,6 +1,6 @@
 namespace: plexus             # not "plexus-ms": collection namespaces forbid hyphens
 name: platform
-version: 3.0.0                # bump on EVERY change under ansible/ — SCM installs record this
+version: 3.0.1                # bump on EVERY change under ansible/ — SCM installs record this
                               # version, so a moved git tag alone is a silent no-op on reinstall
 readme: README.md
 authors:
