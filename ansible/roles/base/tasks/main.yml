@@ -25,7 +25,6 @@
     user: "{{ plexus_deploy_user }}"
     key: "{{ plexus_deploy_pubkey }}"
     state: present
-    exclusive: true
   when: plexus_deploy_pubkey | length > 0
 
 # ── SSH hardening (key-only) ────────────────────────────────────────────────
