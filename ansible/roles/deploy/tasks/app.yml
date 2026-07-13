@@ -65,7 +65,7 @@
 # login above put the credentials, and it's the same user the CI deploy verb
 # uses — provisioning and deploys pull with one identity.
 - name: "{{ app.name }} | pull + start"
-  when: app_deploy | bool
+  when: plexus_up | bool
   become_user: "{{ plexus_deploy_user }}"
   block:
     - name: "{{ app.name }} | docker compose pull"
