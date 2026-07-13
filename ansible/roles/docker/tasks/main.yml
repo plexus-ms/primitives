@@ -54,6 +54,6 @@
 
 - name: Add the deploy user to the docker group
   ansible.builtin.user:
-    name: "{{ deploy_user }}"
+    name: "{{ plexus_deploy_user }}"
     groups: docker
     append: true

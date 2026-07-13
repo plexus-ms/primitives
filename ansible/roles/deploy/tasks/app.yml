@@ -1,28 +1,28 @@
 ---
 - name: "{{ app.name }} | resolve app dir"
   ansible.builtin.set_fact:
-    app_dir: "{{ plexus_root }}/{{ app.name }}"
+    app_dir: "{{ plexus_deploy_root }}/{{ app.name }}"
 
 - name: "{{ app.name }} | create app dir"
   ansible.builtin.file:
     path: "{{ app_dir }}"
     state: directory
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "{{ plexus_deploy_user }}"
+    group: "{{ plexus_deploy_user }}"
     mode: "0750"
 
-# compose.yml comes from this monorepo's apps/<name>/ (single source of
+# compose.yaml comes from this monorepo's apps/<name>/ (single source of
 # truth) — the operator's checkout is the reproducible reference. It is the
 # app's entire host-side surface: services, healthcheck, and (for stateful
 # apps) the one-shot migrate service the deploy verb invokes.
 - name: "{{ app.name }} | place deploy artifacts from the repo"
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../apps/{{ app.name }}/{{ item }}"
+    src: "{{ playbook_dir }}/../apps/{{ app.name }}/docker/{{ item }}"
     dest: "{{ app_dir }}/{{ item }}"
-    owner: "{{ deploy_user }}"
+    owner: "{{ plexus_deploy_user }}"
     mode: "0644"
   loop:
-    - compose.yml
+    - compose.yaml
   loop_control:
     label: "{{ item }}"
 
@@ -31,7 +31,7 @@
   ansible.builtin.copy:
     dest: "{{ app_dir }}/.env"
     content: "IMAGE={{ app.image }}\n"
-    owner: "{{ deploy_user }}"
+    owner: "{{ plexus_deploy_user }}"
     mode: "0640"
     force: false
 
@@ -46,18 +46,17 @@
       {% for key, value in app.secrets.items() %}
       {{ key }}={{ value }}
       {% endfor %}
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "{{ plexus_deploy_user }}"
+    group: "{{ plexus_deploy_user }}"
     mode: "0600"
   when: app.secrets is defined
   no_log: true
 
-# Only needed for PRIVATE images. Public package → skip (recommended for a public site).
 - name: "{{ app.name }} | log in to GHCR as the deploy user"
   ansible.builtin.command:
     cmd: "docker login ghcr.io -u {{ ghcr_user }} --password-stdin"
     stdin: "{{ ghcr_token }}"
-  become_user: "{{ deploy_user }}"
+  become_user: "{{ plexus_deploy_user }}"
   when: ghcr_token | length > 0
   no_log: true
   changed_when: false
@@ -67,7 +66,7 @@
 # uses — provisioning and deploys pull with one identity.
 - name: "{{ app.name }} | pull + start"
   when: app_deploy | bool
-  become_user: "{{ deploy_user }}"
+  become_user: "{{ plexus_deploy_user }}"
   block:
     - name: "{{ app.name }} | docker compose pull"
       ansible.builtin.command:

@@ -1,6 +1,6 @@
 # Managed by Ansible (plexus/infra). Caddy obtains + renews Let's Encrypt certs
 # automatically for each domain below (needs DNS → this host and ports 80/443 open).
-{% for app in apps %}
+{% for app in plexus_apps %}
 {{ app.domain }} {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:{{ app.port }}
