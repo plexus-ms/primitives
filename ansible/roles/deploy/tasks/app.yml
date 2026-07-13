@@ -54,10 +54,10 @@
 
 - name: "{{ app.name }} | log in to GHCR as the deploy user"
   ansible.builtin.command:
-    cmd: "docker login ghcr.io -u {{ ghcr_user }} --password-stdin"
-    stdin: "{{ ghcr_token }}"
+    cmd: "docker login ghcr.io -u {{ plexus_ghcr_user }} --password-stdin"
+    stdin: "{{ plexus_ghcr_token }}"
   become_user: "{{ plexus_deploy_user }}"
-  when: ghcr_token | length > 0
+  when: plexus_ghcr_token | length > 0
   no_log: true
   changed_when: false
 
