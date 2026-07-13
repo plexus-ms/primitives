@@ -1,0 +1,20 @@
+---
+# Deploy-phase counterpart of the caddy role (§ 7.1 PLX): caddy (provision
+# phase) installs and enables the server; this role owns the routing config.
+# Requires a provisioned host — the `caddy validate` step needs the binary.
+
+# Domain→port→app is one inventory record per app, so per-VM port uniqueness
+# is checkable right here instead of being coordination state (§ 7.1 PLX).
+- name: Assert host ports are unique per VM
+  ansible.builtin.assert:
+    that:
+      - plexus_apps | map(attribute='port') | list | unique | length == plexus_apps | length
+    fail_msg: "Duplicate host port in plexus_apps — each app needs its own port."
+
+- name: Configure Caddy (reverse proxy + automatic HTTPS)
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    mode: "0644"
+    validate: "caddy validate --config %s --adapter caddyfile"
+  notify: Reload caddy

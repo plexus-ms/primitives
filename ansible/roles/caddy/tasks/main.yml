@@ -18,14 +18,11 @@
     state: present
     update_cache: true
 
-- name: Configure Caddy (reverse proxy + automatic HTTPS)
-  ansible.builtin.template:
-    src: Caddyfile.j2
-    dest: /etc/caddy/Caddyfile
-    mode: "0644"
-    validate: "caddy validate --config %s --adapter caddyfile"
-  notify: Reload caddy
-
+# No Caddyfile here: routing config is deploy-phase state, owned by the
+# ingress role. The package ships a default Caddyfile serving a static page
+# on :80; that transient stands until the first deploy-playbook run templates
+# the real config — acceptable: it discloses nothing, and TLS certs are only
+# requested once real domains are configured.
 - name: Enable and start Caddy
   ansible.builtin.systemd_service:
     name: caddy

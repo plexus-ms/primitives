@@ -35,9 +35,10 @@
     mode: "0640"
     force: false
 
-# Non-secret platform bindings (§ 5.4, § 7.2 PLX): the host port assigned in the
-# tenant's inventory, interpolated by compose as ${PLEXUS_APP_PORT}. Provisioning
-# is this file's only writer and always overwrites — the inventory is the truth.
+# Non-secret platform bindings (§ 5.4, § 7.2 PLX): the host port assigned in
+# the tenant's inventory, interpolated by compose as ${PLEXUS_APP_PORT}. The
+# platform playbook is this file's only writer and always overwrites — the
+# inventory is the truth.
 - name: "{{ app.name }} | write platform.env with the host-port binding"
   ansible.builtin.copy:
     dest: "{{ app_dir }}/platform.env"
@@ -48,8 +49,9 @@
 
 # Substance stays on the host: per-app secrets from the tenant's `app.secrets` dict
 # (fed from 1Password via `op run`), injected into the container by the app's compose
-# `env_file`. Ownership is deliberately split — the deploy verb owns and clobbers
-# .env, provisioning owns secrets.env, and neither ever writes the other's file.
+# `env_file`. Ownership is deliberately split — the deploy verb owns and
+# clobbers .env, the platform playbook owns secrets.env, and neither ever
+# writes the other's file.
 - name: "{{ app.name }} | place secrets.env"
   ansible.builtin.copy:
     dest: "{{ app_dir }}/secrets.env"
@@ -74,14 +76,14 @@
 
 # Runs as the deploy user so a private registry works: that's where the GHCR
 # login above put the credentials, and it's the same user the CI deploy verb
-# uses — provisioning and deploys pull with one identity.
+# uses — playbook runs and CI deploys pull with one identity.
 - name: "{{ app.name }} | pull + start"
   when: plexus_up | bool
   become_user: "{{ plexus_deploy_user }}"
   block:
     # --env-file replaces compose's implicit .env lookup, so both files are
     # passed explicitly: .env (deploy-verb-owned image ref) + platform.env
-    # (provisioning-owned bindings). Same wiring as the deploy verb's.
+    # (playbook-owned bindings). Same wiring as the deploy verb's.
     - name: "{{ app.name }} | docker compose pull"
       ansible.builtin.command:
         cmd: docker compose --env-file .env --env-file platform.env pull
