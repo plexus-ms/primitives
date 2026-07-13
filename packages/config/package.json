@@ -4,10 +4,12 @@
   "description": "Shared tool configurations for Plexus repos — each an extend-in-one-line subpath export (§ 9 PLX).",
   "license": "GPL-3.0-or-later",
   "files": [
-    "biome.json"
+    "biome.json",
+    "tsconfig-next.json"
   ],
   "exports": {
-    "./biome": "./biome.json"
+    "./biome": "./biome.json",
+    "./tsconfig-next": "./tsconfig-next.json"
   },
   "repository": {
     "type": "git",
