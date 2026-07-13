@@ -1,5 +1,7 @@
-# Managed by Ansible (plexus.platform). Caddy obtains + renews Let's Encrypt certs
-# automatically for each domain below (needs DNS → this host and ports 80/443 open).
+# Managed by Ansible (plexus.platform) — routes for tenant "{{ plexus_tenant }}".
+# Imported by /etc/caddy/Caddyfile; co-hosted tenants own disjoint files.
+# Caddy obtains + renews Let's Encrypt certs automatically for each domain
+# below (needs DNS → this host and ports 80/443 open).
 {% for app in plexus_apps %}
 {{ app.domain }} {
 	encode zstd gzip

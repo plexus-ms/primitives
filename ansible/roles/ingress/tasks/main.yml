@@ -11,10 +11,37 @@
       - plexus_apps | map(attribute='port') | list | unique | length == plexus_apps | length
     fail_msg: "Duplicate host port in plexus_apps — each app needs its own port."
 
-- name: Configure Caddy (reverse proxy + automatic HTTPS)
+# Routing is per-tenant: this playbook writes only its own tenant's file, so
+# co-hosted tenants never touch each other's routes. The fragment lands before
+# the root stub so the stub's import glob always matches when it is validated
+# — which also migrates a pre-split host (monolithic root) in one run.
+- name: Create the per-tenant routing directory
+  ansible.builtin.file:
+    path: /etc/caddy/tenants
+    state: directory
+    mode: "0755"
+
+- name: "Configure this tenant's routes (reverse proxy + automatic HTTPS)"
   ansible.builtin.template:
     src: Caddyfile.j2
-    dest: /etc/caddy/Caddyfile
+    dest: "/etc/caddy/tenants/{{ plexus_tenant }}.caddy"
     mode: "0644"
     validate: "caddy validate --config %s --adapter caddyfile"
   notify: Reload caddy
+
+# No validate: here — ansible validates a temp copy in a temp dir, where the
+# stub's relative import glob cannot resolve. The real check is the next task.
+- name: Point the root Caddyfile at the per-tenant files
+  ansible.builtin.copy:
+    src: Caddyfile
+    dest: /etc/caddy/Caddyfile
+    mode: "0644"
+  notify: Reload caddy
+
+# Validates the combined config in place — root stub plus every tenant's
+# fragment, including ones other tenants wrote — before the reload handler
+# fires at end of play.
+- name: Validate the assembled Caddy config
+  ansible.builtin.command:
+    cmd: caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+  changed_when: false
