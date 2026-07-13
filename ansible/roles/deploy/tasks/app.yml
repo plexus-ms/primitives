@@ -36,13 +36,18 @@
     force: false
 
 # Non-secret platform bindings (§ 5.4, § 7.2 PLX): the host port assigned in
-# the tenant's inventory, interpolated by compose as ${PLEXUS_APP_PORT}. The
-# platform playbook is this file's only writer and always overwrites — the
-# inventory is the truth.
+# the tenant's inventory, interpolated by compose as ${PLEXUS_APP_PORT}, and
+# the compose project name. The project name defaults to the app dir's
+# basename, which collides the moment two co-hosted tenants deploy an app
+# with the same name — so it is pinned tenant-scoped here; compose honors
+# COMPOSE_PROJECT_NAME from --env-file. The platform playbook is this file's
+# only writer and always overwrites — the inventory is the truth.
 - name: "{{ app.name }} | write platform.env with the host-port binding"
   ansible.builtin.copy:
     dest: "{{ app_dir }}/platform.env"
-    content: "PLEXUS_APP_PORT={{ app.port }}\n"
+    content: |
+      PLEXUS_APP_PORT={{ app.port }}
+      COMPOSE_PROJECT_NAME={{ plexus_tenant }}-{{ app.name }}
     owner: "{{ plexus_deploy_user }}"
     group: "{{ plexus_deploy_user }}"
     mode: "0640"
