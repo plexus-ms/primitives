@@ -1,6 +1,6 @@
 namespace: plexus             # not "plexus-ms": collection namespaces forbid hyphens
-name: itops
-version: 2.1.0                # bump on EVERY change under ansible/ — SCM installs record this
+name: platform
+version: 3.0.0                # bump on EVERY change under ansible/ — SCM installs record this
                               # version, so a moved git tag alone is a silent no-op on reinstall
 readme: README.md
 authors:
@@ -9,8 +9,8 @@ description: >-
   Shared Plexus tenant-host roles: base hardening, Docker engine + compose,
   Caddy ingress, per-app deploy, Grafana Alloy observability agent.
 license:
-  - MIT
-repository: https://github.com/plexus-ms/itops
+  - GPL-3.0-or-later
+repository: https://github.com/plexus-ms/platform
 tags: [infrastructure]
 dependencies:
   community.general: ">=9.0.0"

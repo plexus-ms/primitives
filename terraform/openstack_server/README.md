@@ -38,7 +38,7 @@ Generic Terraform module that creates an OpenStack VM consisting of a networking
 
 ```hcl
 module "my_server" {
-  source = "git::https://github.com/davidjalbers/itops-terraform.git//openstack_server"
+  source = "git::https://github.com/plexus-ms/platform.git//terraform/openstack_server?ref=v0.7"
 
   hostname      = "my-server"
   flavor        = "medium"
