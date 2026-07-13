@@ -35,6 +35,17 @@
     mode: "0640"
     force: false
 
+# Non-secret platform bindings (§ 5.4, § 7.2 PLX): the host port assigned in the
+# tenant's inventory, interpolated by compose as ${PLEXUS_APP_PORT}. Provisioning
+# is this file's only writer and always overwrites — the inventory is the truth.
+- name: "{{ app.name }} | write platform.env with the host-port binding"
+  ansible.builtin.copy:
+    dest: "{{ app_dir }}/platform.env"
+    content: "PLEXUS_APP_PORT={{ app.port }}\n"
+    owner: "{{ plexus_deploy_user }}"
+    group: "{{ plexus_deploy_user }}"
+    mode: "0640"
+
 # Substance stays on the host: per-app secrets from the tenant's `app.secrets` dict
 # (fed from 1Password via `op run`), injected into the container by the app's compose
 # `env_file`. Ownership is deliberately split — the deploy verb owns and clobbers
@@ -68,14 +79,17 @@
   when: plexus_up | bool
   become_user: "{{ plexus_deploy_user }}"
   block:
+    # --env-file replaces compose's implicit .env lookup, so both files are
+    # passed explicitly: .env (deploy-verb-owned image ref) + platform.env
+    # (provisioning-owned bindings). Same wiring as the deploy verb's.
     - name: "{{ app.name }} | docker compose pull"
       ansible.builtin.command:
-        cmd: docker compose pull
+        cmd: docker compose --env-file .env --env-file platform.env pull
         chdir: "{{ app_dir }}"
       changed_when: false
     - name: "{{ app.name }} | docker compose up -d"
       ansible.builtin.command:
-        cmd: docker compose up -d
+        cmd: docker compose --env-file .env --env-file platform.env up -d
         chdir: "{{ app_dir }}"
       register: compose_up
       changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"
