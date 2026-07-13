@@ -1,7 +1,7 @@
 ---
 - name: "{{ app.name }} | resolve app dir"
   ansible.builtin.set_fact:
-    app_dir: "{{ plexus_deploy_root }}/{{ app.name }}"
+    app_dir: "{{ plexus_deploy_root }}/{{ plexus_tenant }}/{{ app.name }}"
 
 - name: "{{ app.name }} | create app dir"
   ansible.builtin.file:
