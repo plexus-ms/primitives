@@ -1,6 +1,6 @@
 namespace: plexus             # not "plexus-ms": collection namespaces forbid hyphens
 name: platform
-version: 0.22.0                # mirrors the release-train tag — written by the umbrella ship task.
+version: 0.23.0                # mirrors the release-train tag — written by the umbrella ship task.
                               # SCM installs record this version (a moved git tag alone is a silent
                               # no-op on reinstall); ansible-galaxy reinstalls on any DIFFERENT
                               # version, so the one-time drop from the decoupled 5.x line was safe
