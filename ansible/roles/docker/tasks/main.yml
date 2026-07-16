@@ -57,3 +57,9 @@
     name: "{{ plexus_deploy_user }}"
     groups: docker
     append: true
+  when: plexus_deploy_user is defined
+
+- name: Note that docker group membership is skipped
+  ansible.builtin.debug:
+    msg: Skipping docker group membership as plexus_deploy_user is undefined.
+  when: plexus_deploy_user is not defined

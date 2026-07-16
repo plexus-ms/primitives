@@ -8,6 +8,12 @@
   ansible.builtin.apt:
     name: "{{ plexus_base_packages }}"
     state: present
+  when: plexus_base_packages is defined
+
+- name: Note that base package installation is skipped
+  ansible.builtin.debug:
+    msg: Skipping base package installation as plexus_base_packages is undefined.
+  when: plexus_base_packages is not defined
 
 - name: Set timezone to UTC
   community.general.timezone:
@@ -19,13 +25,29 @@
     name: "{{ plexus_deploy_user }}"
     shell: /bin/bash
     create_home: true
+  when: plexus_deploy_user is defined
+
+- name: Note that deploy user creation is skipped
+  ansible.builtin.debug:
+    msg: Skipping deploy user creation (and deploy key authorization) as plexus_deploy_user is undefined.
+  when: plexus_deploy_user is not defined
 
 - name: Authorize the deploy key (CI runs the deploy verb as this user)
   ansible.posix.authorized_key:
     user: "{{ plexus_deploy_user }}"
     key: "{{ plexus_deploy_pubkey }}"
     state: present
-  when: plexus_deploy_pubkey | length > 0
+  when:
+    - plexus_deploy_user is defined
+    - plexus_deploy_pubkey is defined
+    - plexus_deploy_pubkey | length > 0
+
+- name: Note that deploy key authorization is skipped
+  ansible.builtin.debug:
+    msg: Skipping deploy key authorization as plexus_deploy_pubkey is undefined or empty.
+  when:
+    - plexus_deploy_user is defined
+    - plexus_deploy_pubkey is not defined or plexus_deploy_pubkey | length == 0
 
 # ── SSH hardening (key-only) ────────────────────────────────────────────────
 - name: Harden sshd
