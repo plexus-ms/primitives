@@ -1,6 +1,6 @@
 {
   "name": "@plexus-ms/config",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared, extendable tool configurations",
   "license": "GPL-3.0-or-later",
   "files": [
