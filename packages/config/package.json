@@ -5,10 +5,12 @@
   "license": "GPL-3.0-or-later",
   "files": [
     "biome.json",
+    "tsconfig-cli.json",
     "tsconfig-next.json"
   ],
   "exports": {
     "./biome": "./biome.json",
+    "./tsconfig-cli": "./tsconfig-cli.json",
     "./tsconfig-next": "./tsconfig-next.json"
   },
   "repository": {
