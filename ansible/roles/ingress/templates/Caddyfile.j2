@@ -9,5 +9,26 @@
 	# would be a dependency-status oracle, so the proxy refuses it (§ 7.1 PLX).
 	respond /healthz 403
 	reverse_proxy 127.0.0.1:{{ app.port }}
+	# Backend unreachable (deploy rollout, crash, migration window): serve a
+	# plain maintenance page instead of a bare 502. Auto-refreshes; Retry-After
+	# keeps well-behaved clients polling. Tenants override the copy via
+	# plexus_maintenance_lang / _title / _text in their inventory.
+	handle_errors {
+		@backend_down expression `{err.status_code} in [502, 503, 504]`
+		handle @backend_down {
+			header Retry-After 120
+			respond <<MAINTENANCE
+				<!doctype html><html lang="{{ plexus_maintenance_lang | default('en') }}"><head><meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1">
+				<meta http-equiv="refresh" content="60">
+				<title>{{ plexus_maintenance_title | default('Back in a minute') }}</title>
+				<style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a}main{text-align:center;padding:2rem;max-width:30rem}h1{font-size:1.4rem;margin-bottom:.5rem}p{color:#475569;line-height:1.5}</style>
+				</head><body><main>
+				<h1>{{ plexus_maintenance_title | default('Back in a minute') }}</h1>
+				<p>{{ plexus_maintenance_text | default('This service is briefly unavailable for maintenance. This page refreshes automatically.') }}</p>
+				</main></body></html>
+				MAINTENANCE 503
+		}
+	}
 }
 {% endfor %}
