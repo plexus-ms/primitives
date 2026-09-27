@@ -11,46 +11,35 @@
     group: "{{ plexus_deploy_user }}"
     mode: "0750"
 
-# compose.yaml comes from this monorepo's apps/<name>/ (single source of
-# truth) — the operator's checkout is the reproducible reference. It is the
-# app's entire host-side surface: services, healthcheck, and (for stateful
-# apps) the one-shot migrate service the deploy verb invokes.
-- name: "{{ app.name }} | place deploy artifacts from the repo"
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../apps/{{ app.name }}/docker/{{ item }}"
-    dest: "{{ app_dir }}/{{ item }}"
-    owner: "{{ plexus_deploy_user }}"
-    mode: "0644"
-  loop:
-    - compose.yaml
-  loop_control:
-    label: "{{ item }}"
+# The app's run shape — compose.yaml and env.schema — is NOT placed here. It
+# lives in the app's source repo (an app repo, or this platform repo's own
+# apps/<name>/ for third-party software) and the deploy verb places it at
+# deploy time, so the compose file on the host always matches the image being
+# deployed (§ 5.2 PLX). Five files in the app dir, one writer each (§ 7.2 PLX):
+# this playbook owns platform.env and secrets.env; the deploy verb owns .env,
+# compose.yaml and env.schema.
 
-# Restore baseline: only seed IMAGE when absent so a live CI deploy is never clobbered.
-- name: "{{ app.name }} | seed .env with the restore image"
-  ansible.builtin.copy:
-    dest: "{{ app_dir }}/.env"
-    content: "IMAGE={{ app.image }}\n"
-    owner: "{{ plexus_deploy_user }}"
-    mode: "0640"
-    force: false
-
-# Non-secret platform bindings (§ 5.4, § 7.2 PLX): the host port assigned in
-# the tenant's inventory, interpolated by compose as ${PLEXUS_APP_PORT}, and
-# the compose project name. The project name defaults to the app dir's
-# basename, which collides the moment two co-hosted tenants deploy an app
-# with the same name — so it is pinned tenant-scoped here; compose honors
+# Non-secret platform bindings and values (§ 5.4, § 7.1 PLX): the host port
+# assigned in the tenant's inventory, interpolated by compose as
+# ${PLEXUS_APP_PORT}; the compose project name; and every non-secret value the
+# inventory provides for the app (`app.env`). The project name defaults to the
+# app dir's basename, which collides the moment two co-hosted tenants deploy an
+# app with the same name — so it is pinned tenant-scoped here; compose honors
 # COMPOSE_PROJECT_NAME from --env-file. The platform playbook is this file's
 # only writer and always overwrites — the inventory is the truth.
-- name: "{{ app.name }} | write platform.env with the host-port binding"
+- name: "{{ app.name }} | write platform.env with the host-port binding and values"
   ansible.builtin.copy:
     dest: "{{ app_dir }}/platform.env"
     content: |
       PLEXUS_APP_PORT={{ app.port }}
       COMPOSE_PROJECT_NAME={{ plexus_tenant }}-{{ app.name }}
+      {% for key, value in (app.env | default({})).items() %}
+      {{ key }}={{ value }}
+      {% endfor %}
     owner: "{{ plexus_deploy_user }}"
     group: "{{ plexus_deploy_user }}"
     mode: "0640"
+  notify: Re-create app containers
 
 # Substance stays on the host: per-app secrets from the tenant's `app.secrets` dict
 # (fed from 1Password via `op run`), injected into the container by the app's compose
@@ -69,6 +58,7 @@
     mode: "0600"
   when: app.secrets is defined
   no_log: true
+  notify: Re-create app containers
 
 - name: "{{ app.name }} | log in to GHCR as the deploy user"
   ansible.builtin.command:
@@ -79,11 +69,19 @@
   no_log: true
   changed_when: false
 
+# Nothing to bring up until the deploy verb has placed the run shape: a fresh
+# host stays provisioned-but-empty until the first CI deploy (or a hand-run of
+# the verb), which is the operator's supervised act (§ 8.4 PLX).
+- name: "{{ app.name }} | check whether the deploy verb has placed compose.yaml"
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/compose.yaml"
+  register: app_compose
+
 # Runs as the deploy user so a private registry works: that's where the GHCR
 # login above put the credentials, and it's the same user the CI deploy verb
 # uses — playbook runs and CI deploys pull with one identity.
 - name: "{{ app.name }} | pull + start"
-  when: plexus_up | bool
+  when: plexus_up | bool and app_compose.stat.exists
   become_user: "{{ plexus_deploy_user }}"
   block:
     # --env-file replaces compose's implicit .env lookup, so both files are
@@ -101,8 +99,12 @@
       register: compose_up
       changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"
   rescue:
-    - name: "{{ app.name }} | image not pullable yet (expected before first CI push)"
+    - name: "{{ app.name }} | image not pullable (registry login or a first deploy pending)"
       ansible.builtin.debug:
         msg: >-
-          {{ app.name }}: image {{ app.image }} not available yet.
-          Host is provisioned; run the CI deploy (or push to main) to bring it up.
+          {{ app.name }}: could not pull or start from the compose file on the host.
+          Run the CI deploy (or the deploy verb by hand) to bring it up.
+
+- name: "{{ app.name }} | remember the app dir for the rotation handler"
+  ansible.builtin.set_fact:
+    plexus_app_dirs: "{{ (plexus_app_dirs | default([])) + [app_dir] }}"

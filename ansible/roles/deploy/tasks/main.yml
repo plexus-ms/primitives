@@ -1,4 +1,13 @@
 ---
+# The app name is the join key across repos (§ 7.1 PLX): the inventory record,
+# the compose project <tenant>-<app>, and the host dir all key on it, so it is
+# unique per tenant — across every app repo and this platform repo.
+- name: Assert app names are unique per tenant
+  ansible.builtin.assert:
+    that:
+      - plexus_apps | map(attribute='name') | list | unique | length == plexus_apps | length
+    fail_msg: "Duplicate app name in plexus_apps — app names are unique per tenant (§ 7.1 PLX)."
+
 - name: Configure and start each app
   ansible.builtin.include_tasks: app.yml
   loop: "{{ plexus_apps }}"

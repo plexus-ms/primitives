@@ -7,7 +7,13 @@
 	encode zstd gzip
 	# /healthz is readiness for the deploy verb, probed on the host; publicly it
 	# would be a dependency-status oracle, so the proxy refuses it (§ 7.1 PLX).
+	# A third-party app declares another path via its plexus.healthz label
+	# (§ 5.5 PLX) and mirrors it as `healthz:` in its inventory record, so the
+	# proxy — which has no compose file to read — fences that one too.
 	respond /healthz 403
+{% if app.healthz is defined and app.healthz != '/healthz' %}
+	respond {{ app.healthz }} 403
+{% endif %}
 	reverse_proxy 127.0.0.1:{{ app.port }}
 	# Backend unreachable (deploy rollout, crash, migration window): serve a
 	# plain maintenance page instead of a bare 502. Auto-refreshes; Retry-After
