@@ -11,6 +11,21 @@
       - plexus_apps | map(attribute='loopback_port') | list | unique | length == plexus_apps | length
     fail_msg: "Duplicate loopback port in plexus_apps — each app needs its own loopback_port."
 
+# A host is one site; the apps on it are told apart by path prefix (§ 7.1 PLX).
+# A prefix is a plain path — leading slash, no trailing slash, no wildcard —
+# and each host serves at most one app per prefix, and at most one at its root.
+- name: Assert app path prefixes are well-formed
+  ansible.builtin.assert:
+    that:
+      - plexus_apps | selectattr('path', 'defined') | map(attribute='path') | reject('match', '^(/[A-Za-z0-9._~-]+)+$') | list | length == 0
+    fail_msg: "apps[].path must look like /name or /a/b — leading slash, no trailing slash, no wildcard."
+
+- name: Assert each host serves one app per path prefix
+  ansible.builtin.assert:
+    that:
+      - plexus_apps | map(attribute='host') | zip(plexus_apps | map(attribute='path', default='')) | map('join') | list | unique | length == plexus_apps | length
+    fail_msg: "Two apps in plexus_apps share a host and a path prefix (or both serve the host's root)."
+
 # Routing is per-tenant: this playbook writes only its own tenant's file, so
 # co-hosted tenants never touch each other's routes. The fragment lands before
 # the root stub so the stub's import glob always matches when it is validated
