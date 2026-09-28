@@ -9,7 +9,7 @@ authors:
   - David Julian Albers
 description: >-
   Shared Plexus tenant-host roles: base hardening, Docker engine + compose,
-  Caddy install (caddy) and routing (ingress), per-app deploy, Grafana Alloy
+  Caddy install (caddy) and routing (ingress), per-app configuration, Grafana Alloy
   observability agent.
 license:
   - GPL-3.0-or-later

@@ -8,6 +8,14 @@
       - plexus_apps | map(attribute='name') | list | unique | length == plexus_apps | length
     fail_msg: "Duplicate app name in plexus_apps — app names are unique per tenant (§ 7.1 PLX)."
 
+# Secrets are vault references, never values (§ 7.2 PLX): every entry of
+# apps[].secrets is an op:// pointer, resolved below at playbook time.
+- name: Assert app secrets are op:// pointers
+  ansible.builtin.assert:
+    that:
+      - plexus_apps | map(attribute='secrets', default={}) | map('dict2items') | flatten | map(attribute='value') | reject('match', '^op://') | list | length == 0
+    fail_msg: "Every apps[].secrets value must be an op://vault/item/field pointer (§ 7.2 PLX) — values never live in git."
+
 - name: Configure and start each app
   ansible.builtin.include_tasks: app.yml
   loop: "{{ plexus_apps }}"

@@ -1,0 +1,18 @@
+---
+# Rotation closes inside the playbook (§ 7.2 PLX): environment is injected at
+# container creation, so a rewritten .env or .env.secret rotates a file, not a
+# credential, until the affected containers are re-created. A bare `up -d` —
+# the same invocation the deploy verb and a human use, since compose reads
+# .env implicitly and the image is pinned in the file — re-creates exactly the
+# services whose environment differs. Skipped where the deploy verb has not
+# placed a compose file yet.
+- name: Re-create app containers
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ item }}"
+  loop: "{{ plexus_app_dirs | default([]) }}"
+  become_user: "{{ plexus_deploy_user }}"
+  when: plexus_up | bool
+  register: recreate
+  changed_when: "'Recreated' in recreate.stderr or 'Started' in recreate.stderr"
+  failed_when: recreate.rc != 0 and 'no configuration file' not in recreate.stderr

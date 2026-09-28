@@ -11,28 +11,35 @@
     group: "{{ plexus_deploy_user }}"
     mode: "0750"
 
-# The app's run shape — compose.yaml and env.schema — is NOT placed here. It
-# lives in the app's source repo (an app repo, or this platform repo's own
-# apps/<name>/ for third-party software) and the deploy verb places it at
-# deploy time, so the compose file on the host always matches the image being
-# deployed (§ 5.2 PLX). Five files in the app dir, one writer each (§ 7.2 PLX):
-# this playbook owns platform.env and secrets.env; the deploy verb owns .env,
-# compose.yaml and env.schema.
+# The app's run shape — compose.yaml — is NOT placed here. It lives in the
+# app's source repo (an app repo, or this platform repo's own apps/<name>/ for
+# third-party software) and the deploy verb renders it at deploy time with the
+# image pinned, so the compose file on the host always names the image it
+# serves (§ 5.2 PLX). Three files in the app dir, one writer each (§ 7.2 PLX):
+# this playbook owns .env and .env.secret; the deploy verb owns compose.yaml.
+# Compose reads .env from the project dir implicitly, so every invocation —
+# the verb's, the rotation handler's, a human's — is a bare `docker compose`.
 
-# Non-secret platform bindings and values (§ 5.4, § 7.1 PLX): the host port
-# assigned in the tenant's inventory, interpolated by compose as
-# ${PLEXUS_APP_PORT}; the compose project name; and every non-secret value the
-# inventory provides for the app (`app.env`). The project name defaults to the
-# app dir's basename, which collides the moment two co-hosted tenants deploy an
-# app with the same name — so it is pinned tenant-scoped here; compose honors
-# COMPOSE_PROJECT_NAME from --env-file. The platform playbook is this file's
-# only writer and always overwrites — the inventory is the truth.
-- name: "{{ app.name }} | write platform.env with the host-port binding and values"
+# .env (§ 5.3, § 7.1 PLX), three sections: compose's own setting, the reserved
+# PLEXUS_ bindings, then the non-secret values the inventory provides for the
+# app (`app.env`). The project name defaults to the app dir's basename, which
+# collides the moment two co-hosted tenants deploy an app with the same name
+# — so it is pinned tenant-scoped here. The loopback port is the one assigned
+# in the inventory, interpolated by compose as ${PLEXUS_LOOPBACK_PORT}. This
+# playbook is the file's only writer and always overwrites — the inventory is
+# the truth.
+- name: "{{ app.name }} | write .env (compose setting, platform bindings, values)"
   ansible.builtin.copy:
-    dest: "{{ app_dir }}/platform.env"
+    dest: "{{ app_dir }}/.env"
     content: |
-      PLEXUS_APP_PORT={{ app.port }}
+      # Written by the configure playbook from the tenant inventory. Do not edit.
+      # Compose settings.
       COMPOSE_PROJECT_NAME={{ plexus_tenant }}-{{ app.name }}
+
+      # Platform bindings (reserved PLEXUS_ prefix, § 5.4 PLX).
+      PLEXUS_LOOPBACK_PORT={{ app.loopback_port }}
+
+      # Values from the inventory record, apps[].env (§ 7.1 PLX).
       {% for key, value in (app.env | default({})).items() %}
       {{ key }}={{ value }}
       {% endfor %}
@@ -41,17 +48,18 @@
     mode: "0640"
   notify: Re-create app containers
 
-# Substance stays on the host: per-app secrets from the tenant's `app.secrets` dict
-# (fed from 1Password via `op run`), injected into the container by the app's compose
-# `env_file`. Ownership is deliberately split — the deploy verb owns and
-# clobbers .env, the platform playbook owns secrets.env, and neither ever
-# writes the other's file.
-- name: "{{ app.name }} | place secrets.env"
+# Substance stays on the host: per-app secrets from the tenant's `app.secrets`
+# dict — op:// pointers, resolved from the vault here via the 1Password CLI
+# the playbook wrapper already runs under — injected into the container by the
+# app's compose `env_file`. Never world-readable.
+- name: "{{ app.name }} | write .env.secret (vault-resolved secrets)"
   ansible.builtin.copy:
-    dest: "{{ app_dir }}/secrets.env"
+    dest: "{{ app_dir }}/.env.secret"
     content: |
-      {% for key, value in app.secrets.items() %}
-      {{ key }}={{ value }}
+      # Written by the configure playbook from the tenant inventory, apps[].secrets,
+      # resolved from the vault (§ 7.2 PLX). Do not edit.
+      {% for key, ref in app.secrets.items() %}
+      {{ key }}={{ lookup('ansible.builtin.pipe', 'op read ' ~ (ref | quote)) }}
       {% endfor %}
     owner: "{{ plexus_deploy_user }}"
     group: "{{ plexus_deploy_user }}"
@@ -59,6 +67,15 @@
   when: app.secrets is defined
   no_log: true
   notify: Re-create app containers
+
+# Migration from trains ≤ 0.33, which split the environment over platform.env
+# and secrets.env: both are unreferenced once the app's compose file has been
+# re-rendered by the 0.34 deploy verb. Remove this task in a later train.
+- name: "{{ app.name }} | remove pre-0.34 env files"
+  ansible.builtin.file:
+    path: "{{ app_dir }}/{{ item }}"
+    state: absent
+  loop: [platform.env, secrets.env]
 
 - name: "{{ app.name }} | log in to GHCR as the deploy user"
   ansible.builtin.command:
@@ -84,17 +101,14 @@
   when: plexus_up | bool and app_compose.stat.exists
   become_user: "{{ plexus_deploy_user }}"
   block:
-    # --env-file replaces compose's implicit .env lookup, so both files are
-    # passed explicitly: .env (deploy-verb-owned image ref) + platform.env
-    # (playbook-owned bindings). Same wiring as the deploy verb's.
     - name: "{{ app.name }} | docker compose pull"
       ansible.builtin.command:
-        cmd: docker compose --env-file .env --env-file platform.env pull
+        cmd: docker compose pull
         chdir: "{{ app_dir }}"
       changed_when: false
     - name: "{{ app.name }} | docker compose up -d"
       ansible.builtin.command:
-        cmd: docker compose --env-file .env --env-file platform.env up -d
+        cmd: docker compose up -d
         chdir: "{{ app_dir }}"
       register: compose_up
       changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"
