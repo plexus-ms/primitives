@@ -1,0 +1,18 @@
+---
+# Host-level settings of the Caddy server, rendered into the root Caddyfile.
+# They describe what sits in front of the host, so every tenant co-hosted on
+# the VM has to set them identically (§ 3.5 PLX keeps that to one tenant).
+
+# Sources allowed to send the PROXY protocol (v1/v2) ahead of each connection,
+# e.g. a layer-4 ingress VM that routes by SNI. Empty: no PROXY protocol.
+plexus_ingress_proxy_protocol_from: []
+
+# Proxies whose forwarded client address is believed: a list of CIDRs, or the
+# keyword "cloudflare" for Cloudflare's published ranges. Empty: none, the TCP
+# peer is the client.
+plexus_ingress_trusted_proxies: []
+
+# Header a trusted proxy carries the client address in. Cloudflare uses
+# CF-Connecting-IP, which is the default when trusted_proxies is "cloudflare";
+# X-Forwarded-For otherwise.
+plexus_ingress_client_ip_header: "{{ 'CF-Connecting-IP' if plexus_ingress_trusted_proxies == 'cloudflare' else 'X-Forwarded-For' }}"

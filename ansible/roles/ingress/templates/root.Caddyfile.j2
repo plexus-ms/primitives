@@ -1,0 +1,28 @@
+# Managed by Ansible (plexus.platform). Routing lives in per-tenant files —
+# every tenant's configure playbook writes only its own tenants/<tenant>.caddy,
+# so co-hosted tenants never touch each other's routes. The options below are
+# host-level (what sits in front of this VM) and identical for every tenant.
+{% set trusted = plexus_ingress_cloudflare_ranges if plexus_ingress_trusted_proxies == 'cloudflare' else plexus_ingress_trusted_proxies %}
+{% if plexus_ingress_proxy_protocol_from or trusted %}
+{
+	servers {
+{% if plexus_ingress_proxy_protocol_from %}
+		# The ingress in front sends the PROXY protocol, so Caddy sees the real
+		# TCP peer instead of the ingress; read before TLS.
+		listener_wrappers {
+			proxy_protocol {
+				allow {{ plexus_ingress_proxy_protocol_from | join(' ') }}
+			}
+			tls
+		}
+{% endif %}
+{% if trusted %}
+		# Client address from the proxy's header, believed only when the peer is
+		# one of these; a request that bypasses the proxy cannot forge it.
+		trusted_proxies static {{ trusted | join(' ') }}
+		client_ip_headers {{ plexus_ingress_client_ip_header }}
+{% endif %}
+	}
+}
+{% endif %}
+import tenants/*.caddy

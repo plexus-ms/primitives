@@ -44,11 +44,16 @@
     validate: "caddy validate --config %s --adapter caddyfile"
   notify: Reload caddy
 
+- name: Load Cloudflare's ranges
+  ansible.builtin.include_vars:
+    file: cloudflare.yml
+  when: plexus_ingress_trusted_proxies == 'cloudflare'
+
 # No validate: here — ansible validates a temp copy in a temp dir, where the
 # stub's relative import glob cannot resolve. The real check is the next task.
-- name: Point the root Caddyfile at the per-tenant files
-  ansible.builtin.copy:
-    src: Caddyfile
+- name: Write the root Caddyfile (host-level options, import of the per-tenant files)
+  ansible.builtin.template:
+    src: root.Caddyfile.j2
     dest: /etc/caddy/Caddyfile
     mode: "0644"
   notify: Reload caddy

@@ -1,5 +1,0 @@
-# Managed by Ansible (plexus.platform). Routing lives in per-tenant files —
-# every tenant's configure playbook writes only its own tenants/<tenant>.caddy,
-# so co-hosted tenants never touch each other's routes. This stub is
-# tenant-independent: every tenant writes the identical content.
-import tenants/*.caddy
