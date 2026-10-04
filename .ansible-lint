@@ -6,6 +6,3 @@ skip_list:
   # Per-app tasks are named "<app> | <step>" so a run over several apps reads
   # as one block per app.
   - name[template]
-  # Interim: roles predating the "variable prefix = role name" convention.
-  # Goes when they are renamed.
-  - var-naming[no-role-prefix]

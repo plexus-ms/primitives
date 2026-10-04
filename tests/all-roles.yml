@@ -3,9 +3,9 @@
 - name: Every role of the collection
   hosts: all
   roles:
-    - alloy
     - base
-    - caddy
-    - configure
-    - docker
-    - ingress
+    - configure_apps
+    - configure_ingress
+    - install_alloy
+    - install_caddy
+    - install_docker

@@ -1,11 +1,11 @@
 ---
 - name: "{{ app.name }} | resolve app dir"
   ansible.builtin.set_fact:
-    app_dir: "{{ plexus_deploy_root }}/{{ plexus_tenant }}/{{ app.name }}"
+    configure_apps_dir: "{{ plexus_deploy_root }}/{{ plexus_tenant }}/{{ app.name }}"
 
 - name: "{{ app.name }} | create app dir"
   ansible.builtin.file:
-    path: "{{ app_dir }}"
+    path: "{{ configure_apps_dir }}"
     state: directory
     owner: "{{ plexus_deploy_user }}"
     group: "{{ plexus_deploy_user }}"
@@ -30,7 +30,7 @@
 # the truth.
 - name: "{{ app.name }} | write .env (compose setting, platform bindings, values)"
   ansible.builtin.copy:
-    dest: "{{ app_dir }}/.env"
+    dest: "{{ configure_apps_dir }}/.env"
     content: |
       # Written by the configure playbook from the tenant inventory. Do not edit.
       # Compose settings.
@@ -54,7 +54,7 @@
 # app's compose `env_file`. Never world-readable.
 - name: "{{ app.name }} | write .env.secret (vault-resolved secrets)"
   ansible.builtin.copy:
-    dest: "{{ app_dir }}/.env.secret"
+    dest: "{{ configure_apps_dir }}/.env.secret"
     content: |
       # Written by the configure playbook from the tenant inventory, apps[].secrets,
       # resolved from the vault (§ 7.2 PLX). Do not edit.
@@ -83,28 +83,28 @@
 # the verb), which is the operator's supervised act (§ 8.4 PLX).
 - name: "{{ app.name }} | check whether the deploy verb has placed compose.yaml"
   ansible.builtin.stat:
-    path: "{{ app_dir }}/compose.yaml"
-  register: app_compose
+    path: "{{ configure_apps_dir }}/compose.yaml"
+  register: configure_apps_compose
 
 # Runs as the deploy user so a private registry works: that's where the GHCR
 # login above put the credentials, and it's the same user the CI deploy verb
 # uses — playbook runs and CI deploys pull with one identity.
 - name: "{{ app.name }} | pull + start"
-  when: plexus_up | bool and app_compose.stat.exists
+  when: plexus_up | bool and configure_apps_compose.stat.exists
   become: true
   become_user: "{{ plexus_deploy_user }}"
   block:
     - name: "{{ app.name }} | docker compose pull"
       ansible.builtin.command:
         cmd: docker compose pull
-        chdir: "{{ app_dir }}"
+        chdir: "{{ configure_apps_dir }}"
       changed_when: false
     - name: "{{ app.name }} | docker compose up -d"
       ansible.builtin.command:
         cmd: docker compose up -d
-        chdir: "{{ app_dir }}"
-      register: compose_up
-      changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"
+        chdir: "{{ configure_apps_dir }}"
+      register: configure_apps_up
+      changed_when: "'Started' in configure_apps_up.stderr or 'Recreated' in configure_apps_up.stderr or 'Created' in configure_apps_up.stderr"
   rescue:
     - name: "{{ app.name }} | image not pullable (registry login or a first deploy pending)"
       ansible.builtin.debug:
@@ -114,4 +114,4 @@
 
 - name: "{{ app.name }} | remember the app dir for the rotation handler"
   ansible.builtin.set_fact:
-    plexus_app_dirs: "{{ (plexus_app_dirs | default([])) + [app_dir] }}"
+    configure_apps_dirs: "{{ (configure_apps_dirs | default([])) + [configure_apps_dir] }}"

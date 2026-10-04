@@ -1,5 +1,5 @@
 ---
-# Run AFTER the docker role: the alloy user joins the docker group to read
+# Run AFTER install_docker: the alloy user joins the docker group to read
 # container logs and the Docker socket (cAdvisor, log discovery).
 - name: Add Grafana apt repository
   ansible.builtin.deb822_repository:
@@ -26,7 +26,7 @@
 
 - name: Configure Alloy
   ansible.builtin.template:
-    src: "{{ alloy_config_template }}"
+    src: "{{ install_alloy_config_template }}"
     dest: /etc/alloy/config.alloy
     owner: alloy
     group: alloy

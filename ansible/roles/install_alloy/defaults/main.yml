@@ -1,0 +1,17 @@
+---
+# Telemetry sinks (Grafana Cloud stack or self-hosted Prometheus/Loki).
+install_alloy_prometheus_remote_write_url: ""
+install_alloy_loki_push_url: ""
+install_alloy_basicauth_username: ""
+install_alloy_basicauth_password: ""  # inject at run time (op.env env lookup) — never commit
+
+# Stamped as the `project` label on every metric and log line.
+# Tenants set this to their tenant id: install_alloy_project: "{{ tenant }}"
+install_alloy_project: ""
+
+# Extra app scrape targets: [{name, address, metrics_path (optional)}]
+install_alloy_scrape_targets: []
+
+# Override slot (§ 8 PLX edge-override pattern): a tenant-provided
+# template replaces the stock pipeline wholesale.
+install_alloy_config_template: config.alloy.j2

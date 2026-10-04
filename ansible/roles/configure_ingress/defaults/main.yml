@@ -5,14 +5,14 @@
 
 # Sources allowed to send the PROXY protocol (v1/v2) ahead of each connection,
 # e.g. a layer-4 ingress VM that routes by SNI. Empty: no PROXY protocol.
-plexus_ingress_proxy_protocol_from: []
+configure_ingress_proxy_protocol_from: []
 
 # Proxies whose forwarded client address is believed: a list of CIDRs, or the
 # keyword "cloudflare" for Cloudflare's published ranges. Empty: none, the TCP
 # peer is the client.
-plexus_ingress_trusted_proxies: []
+configure_ingress_trusted_proxies: []
 
 # Header a trusted proxy carries the client address in. Cloudflare uses
 # CF-Connecting-IP, which is the default when trusted_proxies is "cloudflare";
 # X-Forwarded-For otherwise.
-plexus_ingress_client_ip_header: "{{ 'CF-Connecting-IP' if plexus_ingress_trusted_proxies == 'cloudflare' else 'X-Forwarded-For' }}"
+configure_ingress_client_ip_header: "{{ 'CF-Connecting-IP' if configure_ingress_trusted_proxies == 'cloudflare' else 'X-Forwarded-For' }}"

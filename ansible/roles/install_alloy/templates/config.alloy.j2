@@ -21,7 +21,7 @@ prometheus.scrape "containers" {
 }
 
 // ========================= METRICS: Applications =========================
-{% for target in alloy_scrape_targets %}
+{% for target in install_alloy_scrape_targets %}
 
 prometheus.scrape "{{ target.name }}" {
   targets = [
@@ -86,7 +86,7 @@ prometheus.relabel "instance" {
 
   rule {
     target_label = "project"
-    replacement  = "{{ alloy_project }}"
+    replacement  = "{{ install_alloy_project }}"
   }
 }
 
@@ -100,28 +100,28 @@ loki.relabel "instance" {
 
   rule {
     target_label = "project"
-    replacement  = "{{ alloy_project }}"
+    replacement  = "{{ install_alloy_project }}"
   }
 }
 
 prometheus.remote_write "remote" {
   endpoint {
-    url = "{{ alloy_prometheus_remote_write_url }}"
+    url = "{{ install_alloy_prometheus_remote_write_url }}"
 
     basic_auth {
-      username = "{{ alloy_basicauth_username }}"
-      password = "{{ alloy_basicauth_password }}"
+      username = "{{ install_alloy_basicauth_username }}"
+      password = "{{ install_alloy_basicauth_password }}"
     }
   }
 }
 
 loki.write "remote" {
   endpoint {
-    url = "{{ alloy_loki_push_url }}"
+    url = "{{ install_alloy_loki_push_url }}"
 
     basic_auth {
-      username = "{{ alloy_basicauth_username }}"
-      password = "{{ alloy_basicauth_password }}"
+      username = "{{ install_alloy_basicauth_username }}"
+      password = "{{ install_alloy_basicauth_password }}"
     }
   }
 }

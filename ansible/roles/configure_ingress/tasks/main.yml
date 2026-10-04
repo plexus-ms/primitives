@@ -1,5 +1,5 @@
 ---
-# Configure-phase counterpart of the caddy role (§ 7.1 PLX): caddy (provision
+# Configure-phase counterpart of install_caddy (§ 7.1 PLX): install_caddy (provision
 # phase) installs and enables the server; this role owns the routing config.
 # Requires a provisioned host — the `caddy validate` step needs the binary.
 
@@ -49,7 +49,7 @@
 - name: Load Cloudflare's ranges
   ansible.builtin.include_vars:
     file: cloudflare.yml
-  when: plexus_ingress_trusted_proxies == 'cloudflare'
+  when: configure_ingress_trusted_proxies == 'cloudflare'
 
 # No validate: here — ansible validates a temp copy in a temp dir, where the
 # stub's relative import glob cannot resolve. The real check is the next task.

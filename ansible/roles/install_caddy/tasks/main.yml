@@ -19,7 +19,7 @@
     update_cache: true
 
 # No Caddyfile here: routing config is configure-phase state, owned by the
-# ingress role. The package ships a default Caddyfile serving a static page
+# configure_ingress role. The package ships a default Caddyfile serving a static page
 # on :80; that transient stands until the first configure-playbook run templates
 # the real config — acceptable: it discloses nothing, and TLS certs are only
 # requested once real domains are configured.

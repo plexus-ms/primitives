@@ -8,9 +8,10 @@ readme: README.md
 authors:
   - David Julian Albers
 description: >-
-  Shared Plexus tenant-host roles: base hardening, Docker engine + compose,
-  Caddy install (caddy) and routing (ingress), per-app configuration, Grafana Alloy
-  observability agent.
+  Shared Plexus tenant-host roles: base hardening, Docker engine + compose
+  (install_docker), Caddy install (install_caddy) and routing
+  (configure_ingress), per-app configuration (configure_apps), Grafana Alloy
+  observability agent (install_alloy).
 license:
   - GPL-3.0-or-later
 repository: https://github.com/plexus-ms/platform

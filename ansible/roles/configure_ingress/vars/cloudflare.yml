@@ -2,7 +2,7 @@
 # Cloudflare's published ranges (https://www.cloudflare.com/ips), pinned here
 # so a configure run never depends on Cloudflare being reachable; refreshed
 # with the train. Snapshot of 2026-10-03.
-plexus_ingress_cloudflare_ranges:
+configure_ingress_cloudflare_ranges:
   - 173.245.48.0/20
   - 103.21.244.0/22
   - 103.22.200.0/22

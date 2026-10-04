@@ -10,10 +10,10 @@
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: "{{ item }}"
-  loop: "{{ plexus_app_dirs | default([]) }}"
+  loop: "{{ configure_apps_dirs | default([]) }}"
   become: true
   become_user: "{{ plexus_deploy_user }}"
   when: plexus_up | bool
-  register: recreate
-  changed_when: "'Recreated' in recreate.stderr or 'Started' in recreate.stderr"
-  failed_when: recreate.rc != 0 and 'no configuration file' not in recreate.stderr
+  register: configure_apps_recreate
+  changed_when: "'Recreated' in configure_apps_recreate.stderr or 'Started' in configure_apps_recreate.stderr"
+  failed_when: configure_apps_recreate.rc != 0 and 'no configuration file' not in configure_apps_recreate.stderr
