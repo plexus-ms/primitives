@@ -1,0 +1,11 @@
+# Lists every role of the collection so `mise :check` can syntax-check them
+# all; tests/all-roles-listed.sh fails when a role is missing here. Never run.
+- name: Every role of the collection
+  hosts: all
+  roles:
+    - alloy
+    - base
+    - caddy
+    - configure
+    - docker
+    - ingress

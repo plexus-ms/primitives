@@ -11,6 +11,7 @@
     cmd: docker compose up -d
     chdir: "{{ item }}"
   loop: "{{ plexus_app_dirs | default([]) }}"
+  become: true
   become_user: "{{ plexus_deploy_user }}"
   when: plexus_up | bool
   register: recreate

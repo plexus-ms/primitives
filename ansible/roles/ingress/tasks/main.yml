@@ -23,7 +23,9 @@
 - name: Assert each host serves one app per path prefix
   ansible.builtin.assert:
     that:
-      - plexus_apps | map(attribute='host') | zip(plexus_apps | map(attribute='path', default='')) | map('join') | list | unique | length == plexus_apps | length
+      - >-
+        plexus_apps | map(attribute='host') | zip(plexus_apps | map(attribute='path', default=''))
+        | map('join') | list | unique | length == plexus_apps | length
     fail_msg: "Two apps in plexus_apps share a host and a path prefix (or both serve the host's root)."
 
 # Routing is per-tenant: this playbook writes only its own tenant's file, so

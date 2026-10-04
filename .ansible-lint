@@ -1,0 +1,11 @@
+# ansible-lint over the collection (`mise :check`).
+skip_list:
+  # The collection has no changelog; the release train's tag is its version
+  # history (Manual, "the release train").
+  - galaxy[no-changelog]
+  # Per-app tasks are named "<app> | <step>" so a run over several apps reads
+  # as one block per app.
+  - name[template]
+  # Interim: roles predating the "variable prefix = role name" convention.
+  # Goes when they are renamed.
+  - var-naming[no-role-prefix]
