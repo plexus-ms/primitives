@@ -1,0 +1,30 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+# Only this table is replaced on load, so the tables of Docker and an overlay
+# network survive a reload.
+table inet firewall
+delete table inet firewall
+
+table inet firewall {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iif lo accept
+        ct state established,related accept
+        ct state invalid drop
+        meta l4proto { icmp, ipv6-icmp } accept
+        # DHCPv6 replies come from the server's link-local address, which
+        # connection tracking does not match to the multicast request.
+        ip6 saddr fe80::/10 udp sport 547 udp dport 546 accept
+
+{% for interface in configure_firewall_trusted_interfaces %}
+        iifname "{{ interface }}" accept
+{% endfor %}
+{% if configure_firewall_public_tcp | length > 0 %}
+        tcp dport { {{ configure_firewall_public_tcp | join(', ') }} } accept
+{% endif %}
+    }
+}
+
+# Rules of the roles that open listeners; each fragment adds to the table above.
+include "/etc/nftables.d/*.nft"

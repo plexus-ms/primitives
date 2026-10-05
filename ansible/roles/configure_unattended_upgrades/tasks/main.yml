@@ -1,0 +1,102 @@
+---
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+
+- name: Install needrestart
+  ansible.builtin.apt:
+    name: needrestart
+    state: present
+  when: configure_unattended_upgrades_needrestart
+
+- name: Enable the periodic apt runs
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+- name: Configure unattended-upgrades
+  ansible.builtin.template:
+    src: 52-unattended-upgrades-local.j2
+    dest: /etc/apt/apt.conf.d/52-unattended-upgrades-local
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check that apt accepts the configuration
+  ansible.builtin.command:
+    cmd: apt-config dump Unattended-Upgrade::Origins-Pattern
+  register: configure_unattended_upgrades_dump
+  changed_when: false
+  failed_when: "'-updates' not in configure_unattended_upgrades_dump.stdout"
+
+- name: Let needrestart restart services on its own
+  ansible.builtin.copy:
+    dest: /etc/needrestart/conf.d/10-local.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Restart services that use outdated libraries automatically after
+      # unattended upgrades. Kernel updates are the reboot window's business.
+      $nrconf{restart} = 'a';
+      $nrconf{kernelhints} = 0;
+      # Never restart cloud-init: on a first boot it is cloud-init that runs
+      # the upgrade, and restarting it kills that stage halfway.
+      $nrconf{override_rc}{qr(^cloud-(init|config|final))} = 0;
+  when: configure_unattended_upgrades_needrestart
+
+- name: Create the timer drop-in directories
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ item }}.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Schedule the nightly runs
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/{{ item.timer }}.d/10-schedule.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # {{ item.comment }}
+      [Timer]
+      OnCalendar=
+      OnCalendar=*-*-* {{ item.time }}
+      RandomizedDelaySec={{ item.delay }}
+  loop:
+    - timer: apt-daily.timer
+      time: "{{ configure_unattended_upgrades_update_time }}"
+      delay: 30m
+      comment: Refresh package lists shortly before the nightly upgrade run.
+    - timer: apt-daily-upgrade.timer
+      time: "{{ configure_unattended_upgrades_upgrade_time }}"
+      delay: 45m
+      comment: Install upgrades at night, ahead of the reboot window in 52-unattended-upgrades-local.
+  loop_control:
+    label: "{{ item.timer }}"
+  notify: Reload systemd
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the timers and the service
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+    - unattended-upgrades.service

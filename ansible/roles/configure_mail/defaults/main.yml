@@ -1,0 +1,22 @@
+---
+# Local mail to a real mailbox. Everything on a host that reports by mailing
+# root (mdadm, ZED, smartd, unattended-upgrades, cron) reaches nobody on a
+# host without a reader. Postfix runs send-only on loopback: it rewrites every
+# sender to this host's address and every recipient to the one mailbox, hands
+# the message to the relay, and queues it while the relay is unreachable.
+#   configure_mail_smtp:
+#     server: smtp.example.org
+#     port: 587
+#     mode: starttls            # starttls | tls (implicit TLS)
+#     username: relay-user
+#     password: relay-password
+#     from_address: host@example.org   # replaces every From; relays accept their own domain only
+#     mailto: alerts@example.org
+# Empty leaves the host's mail as it is.
+configure_mail_smtp: {}
+
+# Have unattended-upgrades mail when an upgrade fails (never on success).
+configure_mail_unattended_upgrades: true
+
+# Mail when any systemd service fails: its status and last log lines.
+configure_mail_failed_units: true

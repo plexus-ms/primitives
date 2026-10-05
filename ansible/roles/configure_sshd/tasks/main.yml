@@ -1,0 +1,41 @@
+---
+# Listed last in a play: closing root logins takes effect when the handler
+# runs, and nothing after it should depend on the connection it was made on.
+
+# Root logins close only once someone has logged in as an admin: a first run
+# as root creates the admins (configure_iam) and leaves root key-only; the
+# next run, made as an admin, closes it.
+# sudo names the user it was called by; without it the play logged in as the
+# user it runs as. (Not `become: false`: an inventory's ansible_become wins
+# over the task keyword.)
+- name: Read the login user
+  ansible.builtin.shell:
+    cmd: echo "${SUDO_USER:-$(id -un)}"
+  register: configure_sshd_login_user
+  changed_when: false
+  check_mode: false
+
+- name: Note that root logins stay open for now
+  ansible.builtin.debug:
+    msg: This run logged in as root, so root logins stay open (key-only). Run again as an admin to close them.
+  when: configure_sshd_login_user.stdout == 'root'
+
+# A drop-in rather than edits to sshd_config: sshd keeps the first value it
+# reads and sshd_config includes sshd_config.d/*.conf before its own settings,
+# so this file must sort before any drop-in that says otherwise (cloud images
+# ship 50-cloud-init.conf, some with "PasswordAuthentication yes").
+- name: Make sshd key-only
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/00-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: sshd -t -f %s
+    content: |
+      # Key-only SSH. Sorts before 50-cloud-init.conf, and sshd keeps the first value it reads.
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      # Admins log in as themselves and sudo (configure_iam); root is console-only.
+      PermitRootLogin {{ 'prohibit-password' if configure_sshd_login_user.stdout == 'root' else 'no' }}
+      X11Forwarding no
+  notify: Reload ssh

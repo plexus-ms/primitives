@@ -1,0 +1,64 @@
+---
+- name: Update the apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install the base packages
+  ansible.builtin.apt:
+    name: "{{ configure_base_packages }}"
+    state: present
+
+- name: Purge packages the provider's image brought along
+  ansible.builtin.apt:
+    name: "{{ configure_base_packages_absent }}"
+    state: absent
+    purge: true
+    autoremove: true
+  when: configure_base_packages_absent | length > 0
+
+- name: Set the timezone
+  community.general.timezone:
+    name: "{{ configure_base_timezone }}"
+
+- name: Create the journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Keep the journal on disk and cap it
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/10-plexus.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Journal]
+      Storage=persistent
+      Compress=yes
+      SystemMaxUse={{ configure_base_journal_max_use }}
+      MaxRetentionSec={{ configure_base_journal_retention }}
+  notify: Restart journald
+
+- name: Harden the kernel configuration
+  when: configure_base_kernel_hardening
+  block:
+    - name: Write the sysctl settings
+      ansible.builtin.copy:
+        src: 90-plexus-hardening.conf
+        dest: /etc/sysctl.d/90-plexus-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Apply sysctl settings
+
+    - name: Block rarely used protocols and filesystems
+      ansible.builtin.copy:
+        src: plexus-blocklist.conf
+        dest: /etc/modprobe.d/plexus-blocklist.conf
+        owner: root
+        group: root
+        mode: "0644"

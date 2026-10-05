@@ -1,0 +1,50 @@
+---
+# Adds one role's rules to the firewall. Called by the role that opens the
+# listener:
+#
+#   - ansible.builtin.include_role:
+#       name: plexus.platform.configure_firewall
+#       tasks_from: fragment
+#     vars:
+#       configure_firewall_fragment_name: caddy
+#       configure_firewall_fragment_rules: |
+#         add rule inet firewall input tcp dport { 80, 443 } accept
+#
+# On a host where configure_firewall has not run the fragment is written and
+# inert; the role loads it when it runs.
+- name: Create the fragment directory
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the firewall fragment {{ configure_firewall_fragment_name }}
+  ansible.builtin.copy:
+    dest: /etc/nftables.d/{{ configure_firewall_fragment_name }}.nft
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Written by the plexus.platform collection; loaded by /etc/nftables.conf.
+      {{ configure_firewall_fragment_rules }}
+  register: configure_firewall_fragment
+
+# The nftables package ships its own /etc/nftables.conf, which flushes every
+# table; only this role's file may be loaded.
+- name: Check whether this role's firewall is installed
+  ansible.builtin.command:
+    cmd: grep -qs 'table inet firewall' /etc/nftables.conf
+  register: configure_firewall_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# On every run, so a fragment that failed to load once fails again instead of
+# passing unnoticed.
+- name: Load the firewall rules with the fragment
+  ansible.builtin.command:
+    cmd: nft -f /etc/nftables.conf
+  when: configure_firewall_installed.rc == 0
+  changed_when: configure_firewall_fragment is changed

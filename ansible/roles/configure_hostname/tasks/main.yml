@@ -1,0 +1,58 @@
+---
+- name: Read network facts
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - "!min"
+      - network
+
+- name: Set the hostname
+  ansible.builtin.hostname:
+    name: "{{ configure_hostname_fqdn.split('.') | first }}"
+
+- name: Map the name to the host's own address
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ item.address | regex_escape }}\s'
+    line: "{{ item.address }}\t{{ configure_hostname_fqdn }}\t{{ configure_hostname_fqdn.split('.') | first }}"
+  loop:
+    - address: "{{ configure_hostname_ipv4 }}"
+    - address: "{{ configure_hostname_ipv6 }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when: item.address | length > 0
+
+- name: Drop other lines that still carry the host's name
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ configure_hostname_not_own }}\S+\s+(.*\s)?{{ configure_hostname_short | regex_escape }}(\s|$)'
+    state: absent
+  vars:
+    configure_hostname_short: "{{ configure_hostname_fqdn.split('.') | first }}"
+    configure_hostname_not_own: '(?!{{ configure_hostname_ipv4 | regex_escape }}\s)(?!{{ configure_hostname_ipv6 | regex_escape }}\s)'
+
+- name: Set the mail name
+  ansible.builtin.copy:
+    dest: /etc/mailname
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ configure_hostname_fqdn }}\n"
+
+# Where a provider's image runs cloud-init, keep it from putting the
+# install-time name back and from regenerating /etc/hosts at boot.
+- name: Check for cloud-init
+  ansible.builtin.stat:
+    path: /etc/cloud/cloud.cfg.d
+  register: configure_hostname_cloud
+
+- name: Keep cloud-init from managing the hostname
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/90-preserve-hostname.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      preserve_hostname: true
+      manage_etc_hosts: false
+  when: configure_hostname_cloud.stat.exists

@@ -1,0 +1,7 @@
+---
+# The host's FQDN; the short name is its first label. The name is mapped to
+# the host's own address in /etc/hosts, which a hypervisor such as Proxmox
+# requires.
+configure_hostname_fqdn: "{{ ansible_facts.fqdn }}"
+configure_hostname_ipv4: "{{ ansible_facts.default_ipv4.address | default('') }}"
+configure_hostname_ipv6: "{{ ansible_facts.default_ipv6.address | default('') }}"

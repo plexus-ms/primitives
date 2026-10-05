@@ -1,0 +1,56 @@
+---
+- name: Add NetBird apt repository
+  ansible.builtin.deb822_repository:
+    name: netbird
+    types: deb
+    uris: https://pkgs.netbird.io/debian
+    suites: stable
+    components: main
+    signed_by: https://pkgs.netbird.io/debian/public.key
+    state: present
+
+- name: Install NetBird
+  ansible.builtin.apt:
+    name: netbird
+    state: present
+    update_cache: true
+
+- name: Enable and start the NetBird daemon
+  ansible.builtin.systemd_service:
+    name: netbird
+    state: started
+    enabled: true
+
+- name: Read NetBird status
+  ansible.builtin.command:
+    cmd: netbird status
+  register: install_and_join_netbird_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  # A daemon that has just started takes a moment to reach the management
+  # server; a host that has not joined waits these few seconds once.
+  until: "'Management: Connected' in install_and_join_netbird_status.stdout"
+  retries: 5
+  delay: 3
+
+- name: Fail when the host needs to join but no setup key is provided
+  ansible.builtin.assert:
+    that: install_and_join_netbird_setup_key | length > 0
+    fail_msg: >-
+      The host has not joined a NetBird network and install_and_join_netbird_setup_key is empty;
+      provide NETBIRD_SETUP_KEY environment variable and re-run.
+  when:
+    - "'Management: Connected' not in install_and_join_netbird_status.stdout"
+    - not ansible_check_mode
+
+- name: Join the NetBird network
+  ansible.builtin.command:
+    cmd: >-
+      netbird up
+      {{ ('--management-url ' ~ (install_and_join_netbird_management_url | quote)) if install_and_join_netbird_management_url | length > 0 else '' }}
+  environment:
+    NB_SETUP_KEY: "{{ install_and_join_netbird_setup_key }}"
+  when: "'Management: Connected' not in install_and_join_netbird_status.stdout"
+  changed_when: true
+  no_log: true

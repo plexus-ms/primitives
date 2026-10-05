@@ -1,0 +1,20 @@
+---
+- name: Create the deploy user
+  ansible.builtin.user:
+    name: "{{ plexus_deploy_user }}"
+    shell: /bin/bash
+    create_home: true
+    groups: "{{ configure_deploy_user_groups }}"
+    append: true
+
+- name: Authorize the deploy key (CI runs the deploy verb as this user)
+  ansible.posix.authorized_key:
+    user: "{{ plexus_deploy_user }}"
+    key: "{{ plexus_deploy_pubkey }}"
+    state: present
+  when: plexus_deploy_pubkey | default('') | length > 0
+
+- name: Note that deploy key authorization is skipped
+  ansible.builtin.debug:
+    msg: Skipping deploy key authorization as plexus_deploy_pubkey is undefined or empty.
+  when: plexus_deploy_pubkey | default('') | length == 0

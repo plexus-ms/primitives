@@ -3,9 +3,17 @@
 - name: Every role of the collection
   hosts: all
   roles:
-    - base
     - configure_apps
+    - configure_base
+    - configure_deploy_user
+    - configure_firewall
+    - configure_hostname
+    - configure_iam
     - configure_ingress
+    - configure_mail
+    - configure_sshd
+    - configure_unattended_upgrades
     - install_alloy
+    - install_and_join_netbird
     - install_caddy
     - install_docker

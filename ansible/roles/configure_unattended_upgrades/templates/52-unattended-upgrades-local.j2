@@ -1,0 +1,19 @@
+// {{ ansible_managed }}
+// Additions to Debian's 50unattended-upgrades. APT merges list entries across
+// files, so the Debian and Debian-Security origins from there stay active.
+
+Unattended-Upgrade::Origins-Pattern {
+    // Urgent non-security fixes (tzdata, certificates, ...).
+    "origin=Debian,codename=${distro_codename}-updates,label=Debian";
+{% for origin in configure_unattended_upgrades_extra_origins %}
+    "{{ origin }}";
+{% endfor %}
+};
+
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+Unattended-Upgrade::SyslogEnable "true";
+
+Unattended-Upgrade::Automatic-Reboot "{{ configure_unattended_upgrades_automatic_reboot | lower }}";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "{{ configure_unattended_upgrades_automatic_reboot_time }}";

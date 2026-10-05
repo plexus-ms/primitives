@@ -1,0 +1,8 @@
+---
+# The unprivileged user that owns the app directories and runs the deploy
+# verb over SSH (plexus_deploy_user, plexus_deploy_pubkey: shared with
+# configure_apps, so they keep the plexus_ prefix).
+
+# Further groups for the deploy user, e.g. the group an image's sshd policy
+# admits logins from.
+configure_deploy_user_groups: []

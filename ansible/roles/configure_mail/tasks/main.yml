@@ -1,0 +1,127 @@
+---
+- name: Local mail to a real mailbox
+  when: configure_mail_smtp | length > 0
+  block:
+    - name: Install Postfix and mail(1)
+      ansible.builtin.apt:
+        name:
+          - postfix
+          - libsasl2-modules # SASL PLAIN/LOGIN towards the relay
+          - bsd-mailx
+        state: present
+
+    - name: Write the relay credentials
+      ansible.builtin.copy:
+        dest: /etc/postfix/sasl_passwd
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          [{{ configure_mail_smtp.server }}]:{{ configure_mail_smtp.port }} {{ configure_mail_smtp.username }}:{{ configure_mail_smtp.password }}
+      no_log: true
+      notify: Reload postfix
+
+    - name: Write the Postfix configuration
+      ansible.builtin.template:
+        src: main.cf.j2
+        dest: /etc/postfix/main.cf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart postfix
+
+    - name: Enable Postfix
+      ansible.builtin.systemd_service:
+        name: postfix
+        enabled: true
+        state: started
+
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+
+    # ── origins that need telling ───────────────────────────────────────────
+    # mdadm and smartd mail root as installed. ZED does once it has an address.
+    - name: Check for ZED
+      ansible.builtin.stat:
+        path: /etc/zfs/zed.d/zed.rc
+      register: configure_mail_zed
+
+    - name: Have ZED mail root
+      ansible.builtin.lineinfile:
+        path: /etc/zfs/zed.d/zed.rc
+        regexp: '^#?ZED_EMAIL_ADDR='
+        line: ZED_EMAIL_ADDR="root"
+      when: configure_mail_zed.stat.exists
+      notify: Restart zed
+
+    - name: Have unattended-upgrades mail root when an upgrade fails
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/53unattended-upgrades-mail
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          Unattended-Upgrade::Mail "root";
+          Unattended-Upgrade::MailReport "only-on-error";
+      when: configure_mail_unattended_upgrades
+
+    # ── failed services ─────────────────────────────────────────────────────
+    - name: Mail when a systemd service fails
+      when: configure_mail_failed_units
+      block:
+        - name: Install the failure-mail script
+          ansible.builtin.copy:
+            src: failure-mail
+            dest: /usr/local/sbin/failure-mail
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Install the failure-mail unit
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/failure-mail@.service
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              Description=Mail root that %i failed
+
+              [Service]
+              Type=oneshot
+              ExecStart=/usr/local/sbin/failure-mail %i
+          notify: Reload systemd
+
+        - name: Create the drop-in directories
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - service.d
+            - failure-mail@.service.d
+
+        # A drop-in in service.d applies to every service on the host.
+        - name: Make it the OnFailure of every service
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/service.d/10-failure-mail.conf
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              OnFailure=failure-mail@%n.service
+          notify: Reload systemd
+
+        - name: Except of itself
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/failure-mail@.service.d/10-failure-mail.conf
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              [Unit]
+              OnFailure=
+          notify: Reload systemd

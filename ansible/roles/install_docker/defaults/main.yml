@@ -1,3 +1,16 @@
 ---
-# Rendered into /etc/docker/daemon.json when non-empty (opt-in).
-install_docker_daemon_json: {}
+# Rendered into /etc/docker/daemon.json; empty leaves the file untouched.
+# The defaults: logs rotated by Docker itself, containers that keep running
+# while the daemon restarts (so an unattended Docker upgrade does not stop
+# them), and no privilege escalation inside containers.
+install_docker_daemon_json:
+  log-driver: local
+  log-opts:
+    max-size: 20m
+    max-file: "5"
+  live-restore: true
+  no-new-privileges: true
+
+# Let unattended-upgrades (configure_unattended_upgrades) upgrade Docker too.
+# An upgrade restarts the daemon but not the containers, given live-restore.
+install_docker_unattended_upgrades: true

@@ -1,0 +1,7 @@
+---
+# A use-once setup key, needed only while the host has not joined; taken
+# from the environment so it is never committed.
+install_and_join_netbird_setup_key: "{{ lookup('ansible.builtin.env', 'NETBIRD_SETUP_KEY') }}"
+
+# Management server to join. Empty = NetBird Cloud
+install_and_join_netbird_management_url: ""

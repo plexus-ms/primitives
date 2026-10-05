@@ -1,0 +1,54 @@
+---
+# configure_sshd closes root logins, so a host without an admin account is a
+# host nobody can log in to.
+- name: Fail when no admin is defined
+  ansible.builtin.assert:
+    that: configure_iam_admins | length > 0
+    fail_msg: configure_iam_admins is empty; define at least one admin with an SSH key.
+    quiet: true
+
+# SSH is key-only (configure_sshd), so an admin without a key cannot log in.
+- name: Fail when an admin has no SSH key
+  ansible.builtin.assert:
+    that: item.ssh_keys | length > 0
+    fail_msg: "{{ item.name }} has no ssh_keys in configure_iam_admins."
+    quiet: true
+  loop: "{{ configure_iam_admins }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Install sudo
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+
+- name: Create the admin accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    shell: /bin/bash
+    groups: "{{ ['sudo'] + configure_iam_groups }}"
+    append: true
+  loop: "{{ configure_iam_admins }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# exclusive: a key removed from configure_iam_admins is removed from the host.
+- name: Authorize exactly the listed SSH keys
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.ssh_keys | join('\n') }}"
+    exclusive: true
+  loop: "{{ configure_iam_admins }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# The SSH key is the one factor for shell access; sudo asks for nothing more.
+- name: Allow passwordless sudo for the sudo group
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/admins
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+    content: |
+      %sudo ALL=(ALL:ALL) NOPASSWD: ALL

@@ -1,0 +1,12 @@
+---
+# Human admins. Each gets a personal Linux account with key-only SSH and
+# passwordless sudo; the role never sets a password. Keys are exclusive: one
+# removed here is removed from the host.
+#   configure_iam_admins:
+#     - name: alice
+#       ssh_keys: ["ssh-ed25519 AAAA… alice@example.org"]
+configure_iam_admins: []
+
+# Further groups for every admin besides sudo, e.g. the group an image's sshd
+# policy admits logins from.
+configure_iam_groups: []

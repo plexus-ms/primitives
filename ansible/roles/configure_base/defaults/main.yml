@@ -1,0 +1,29 @@
+---
+# What every host has in common before anything else is installed: a current
+# apt cache, a few packages, a timezone, a bounded journal, and a hardened
+# kernel configuration.
+
+# Packages every host gets. The first four are what the collection's own
+# modules need on the host (deb822_repository, become_user).
+configure_base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - python3-debian
+  - acl
+
+# Packages to purge, e.g. a provider image's DNS server listening on the
+# public address. Per host in host_vars.
+configure_base_packages_absent: []
+
+configure_base_timezone: Etc/UTC
+
+# The journal is kept on disk and capped, so logs survive a reboot and cannot
+# fill the disk.
+configure_base_journal_max_use: 1G
+configure_base_journal_retention: 90day
+
+# sysctl hardening and a blocklist of rarely used protocols and filesystems.
+# IP forwarding is not touched: Docker, an overlay network and a router each
+# manage it themselves.
+configure_base_kernel_hardening: true

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Mail root that a systemd unit failed, with its status and last log lines.
+# Started by failure-mail@<unit>.service, the OnFailure of every service.
+set -eu
+unit="$1"
+{
+    systemctl status --full --no-pager "$unit" || true
+    echo
+    journalctl --no-pager -n 50 -u "$unit" || true
+} | mail -s "[$(hostname)] $unit failed" root

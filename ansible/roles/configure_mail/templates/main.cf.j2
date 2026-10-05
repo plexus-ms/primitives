@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+# Send-only: accepts mail from this host's own programs and hands all of it to
+# the relay. Nothing is delivered locally and nothing is accepted from outside.
+compatibility_level = 3.6
+inet_interfaces = loopback-only
+mydestination =
+relayhost = [{{ configure_mail_smtp.server }}]:{{ configure_mail_smtp.port }}
+
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = texthash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_tls_security_level = encrypt
+smtp_tls_wrappermode = {{ 'yes' if configure_mail_smtp.mode == 'tls' else 'no' }}
+smtp_tls_CApath = /etc/ssl/certs
+
+# Whoever a message is from or to (root, postmaster, cron's user), envelope
+# and headers become this host's address and the one mailbox: the relay
+# accepts its own domain only, and nobody reads local mail.
+sender_canonical_maps = static:{{ configure_mail_smtp.from_address }}
+recipient_canonical_maps = static:{{ configure_mail_smtp.mailto }}

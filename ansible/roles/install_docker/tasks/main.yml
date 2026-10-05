@@ -12,7 +12,7 @@
     state: absent
 
 # deb822_repository fetches and stores the signing key itself (needs
-# python3-debian on the host — in base_packages). It does NOT refresh the apt
+# python3-debian on the host — configure_base installs it). It does NOT refresh the apt
 # cache; the install task below does, via update_cache.
 - name: Add Docker apt repository
   ansible.builtin.deb822_repository:
@@ -36,8 +36,8 @@
     state: present
     update_cache: true
 
-# Opt-in: a tenant that needs daemon-level config (log driver, registries, …)
-# sets install_docker_daemon_json in group_vars. Empty default = file untouched.
+# A tenant that needs other daemon-level config (registries, …) overrides
+# install_docker_daemon_json in group_vars; empty leaves the file untouched.
 - name: Configure the Docker daemon
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json
@@ -45,6 +45,18 @@
     mode: "0644"
   when: install_docker_daemon_json | length > 0
   notify: Restart docker
+
+- name: Let unattended-upgrades upgrade Docker
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/53-unattended-upgrades-docker
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Origins-Pattern {
+          "site=download.docker.com";
+      };
+  when: install_docker_unattended_upgrades
 
 - name: Enable and start Docker
   ansible.builtin.systemd_service:
@@ -58,8 +70,3 @@
     groups: docker
     append: true
   when: plexus_deploy_user is defined
-
-- name: Note that docker group membership is skipped
-  ansible.builtin.debug:
-    msg: Skipping docker group membership as plexus_deploy_user is undefined.
-  when: plexus_deploy_user is not defined

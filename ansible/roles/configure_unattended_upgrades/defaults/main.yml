@@ -1,0 +1,25 @@
+---
+# Unattended security upgrades for Debian hosts, hypervisor and guests alike
+# (§ 7.5 PLX). Debian's own 50unattended-upgrades stays in place; the role adds
+# a drop-in on top of it, so the Debian and Debian-Security origins remain and
+# only Debian's stable-updates is added. Packages from other repos (Proxmox,
+# Docker, NetBird) are not touched unless listed below.
+#
+# Further origins to upgrade unattended, in apt's Origins-Pattern syntax:
+#   configure_unattended_upgrades_extra_origins:
+#     - "site=pkgs.netbird.io"
+#     - "origin=Docker"
+configure_unattended_upgrades_extra_origins: []
+
+# Reboot by itself when an upgrade asks for it (kernel, libc). Off for a
+# hypervisor: its reboot takes every guest down, so that stays a supervised act.
+configure_unattended_upgrades_automatic_reboot: false
+configure_unattended_upgrades_automatic_reboot_time: "04:00"
+
+# When the nightly runs happen (systemd OnCalendar), both randomized a little.
+configure_unattended_upgrades_update_time: "01:00"
+configure_unattended_upgrades_upgrade_time: "02:00"
+
+# Restart services that run on outdated libraries after an upgrade, without
+# asking. Kernel hints are off: a kernel update is the reboot window's business.
+configure_unattended_upgrades_needrestart: true

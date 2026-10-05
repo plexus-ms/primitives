@@ -1,0 +1,15 @@
+---
+# The host firewall: nftables, inbound closed by default. This role owns
+# /etc/nftables.conf and the table `inet firewall`; a role that opens a
+# listener adds its rules as a fragment in /etc/nftables.d (tasks/fragment.yml),
+# so no two roles write the same file.
+#
+# Only the input chain is filtered. Forwarding stays with whoever routes on
+# the host (Docker, an overlay network, a router role), each in its own table.
+
+# TCP ports open to everyone.
+configure_firewall_public_tcp: [22]
+
+# Interfaces whose traffic is accepted whole, e.g. an overlay network's
+# interface (wt0 for NetBird) or an internal bridge.
+configure_firewall_trusted_interfaces: []
