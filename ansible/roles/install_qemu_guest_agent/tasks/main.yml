@@ -1,0 +1,16 @@
+---
+# For a guest of a QEMU/KVM hypervisor that enables the agent for it (as
+# plexus.platform.configure_guests does): a backup freezes the guest's file
+# systems for the moment it starts, and the hypervisor can shut the guest down
+# cleanly and run a command in it (`qm guest exec`, the break-glass path).
+- name: Install the QEMU guest agent
+  ansible.builtin.apt:
+    name: qemu-guest-agent
+    state: present
+
+# The unit is bound to the agent's virtio device and starts with it at boot;
+# there is nothing to enable.
+- name: Start the QEMU guest agent
+  ansible.builtin.systemd_service:
+    name: qemu-guest-agent
+    state: started

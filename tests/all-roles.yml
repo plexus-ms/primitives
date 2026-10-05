@@ -7,6 +7,7 @@
     - configure_base
     - configure_deploy_user
     - configure_firewall
+    - configure_guests
     - configure_haproxy
     - configure_hostname
     - configure_iam
@@ -20,3 +21,4 @@
     - install_and_join_netbird
     - install_caddy
     - install_docker
+    - install_qemu_guest_agent

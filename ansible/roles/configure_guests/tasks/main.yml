@@ -1,0 +1,67 @@
+---
+- name: Read the existing guests
+  ansible.builtin.command:
+    cmd: pvesh get /nodes/{{ ansible_facts.hostname }}/qemu --output-format json
+  register: configure_guests_existing
+  changed_when: false
+  check_mode: false
+
+- name: Create the missing guests
+  when: configure_guests_missing | length > 0
+  vars:
+    configure_guests_missing: >-
+      {{ configure_guests_list
+         | rejectattr('vmid', 'in', configure_guests_existing.stdout | from_json | map(attribute='vmid') | list)
+         | list }}
+    configure_guests_image: "{{ configure_guests_image_dir }}/{{ configure_guests_image_url | basename }}"
+    configure_guests_ssh_keys: /run/configure_guests.keys
+  block:
+    - name: Fail when there is no admin to log in to a new guest
+      ansible.builtin.assert:
+        that:
+          - configure_guests_admin.name is defined
+          - configure_guests_admin.ssh_keys | default([]) | length > 0
+        fail_msg: >-
+          A new guest would have no account to log in to; set configure_iam_admins
+          or configure_guests_admin (name, ssh_keys).
+        quiet: true
+
+    - name: Create the image directory
+      ansible.builtin.file:
+        path: "{{ configure_guests_image_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download the cloud image
+      ansible.builtin.get_url:
+        url: "{{ configure_guests_image_url }}"
+        dest: "{{ configure_guests_image }}"
+        checksum: "{{ configure_guests_image_checksum }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: not ansible_check_mode # the module would fetch the whole image to compare it
+
+    # qm reads the keys from a file; it is only the hand-over, on tmpfs.
+    - name: Hand the admin's SSH keys over
+      ansible.builtin.copy:
+        dest: "{{ configure_guests_ssh_keys }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: "{{ configure_guests_admin.ssh_keys | join('\n') }}\n"
+      changed_when: false
+
+    - name: Create each missing guest
+      ansible.builtin.include_tasks: create.yml
+      loop: "{{ configure_guests_missing }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.vmid }})"
+
+    - name: Remove the handed-over keys
+      ansible.builtin.file:
+        path: "{{ configure_guests_ssh_keys }}"
+        state: absent
+      changed_when: false

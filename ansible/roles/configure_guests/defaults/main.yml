@@ -1,0 +1,46 @@
+---
+# Guests on this hypervisor, each created from the stock Debian cloud image:
+# no template VM and no image of our own. Proxmox's built-in cloud-init gives
+# a new guest its name, its network and one admin account; everything else is
+# the roles' job, on the first playbook run against the guest. A guest that
+# exists is left alone: Proxmox owns its runtime state.
+#
+# The Proxmox name is the guest's hostname. `nets` are attached in order as
+# net0, net1, …; a guest without a public address sets the ingress VM as its
+# gateway and is first reached through it as jump host.
+#   configure_guests_list:
+#     - vmid: 101
+#       name: vm101
+#       description: what it is for
+#       cores: 2
+#       memory: 4096
+#       disk: 20G
+#       nets:
+#         - bridge: vmbr1
+#           ip: 10.10.0.11/24
+#           gw: 10.10.0.1               # optional
+#           mac: "02:00:00:00:00:00"    # optional
+configure_guests_list: []
+
+# The image new guests start from, pinned by build and checksum (SHA512SUMS
+# next to the image). Bumping it changes future guests only.
+configure_guests_image_url: https://cloud.debian.org/images/cloud/trixie/20261001-2618/debian-13-genericcloud-amd64-20261001-2618.qcow2
+# yamllint disable-line rule:line-length
+configure_guests_image_checksum: sha512:f46f0671a6e5bdec5291ab8972bae2f10e5408c2f64a74078f11efc2f06a436a9d0313ed50e0472542eeabf780e9f7c792ac0a314c6c20507fcd9fd81b468c3d
+configure_guests_image_dir: /var/lib/configure_guests
+
+# Proxmox storage for guest disks (plexus.platform.configure_proxmox registers it).
+configure_guests_storage: "{{ configure_proxmox_zfs_vm_storage | default('local-zfs') }}"
+
+configure_guests_cpu: host
+
+# The account cloud-init creates, with passwordless sudo and these keys: the
+# first admin, as whom the first playbook run connects.
+# plexus.platform.configure_iam then creates the others.
+configure_guests_admin: "{{ configure_iam_admins | default([]) | first | default({}) }}"
+
+# DNS of the guests. The resolvers are set explicitly: left out, Proxmox hands
+# a guest the hypervisor's own, which on an overlay network is an address the
+# guest cannot reach. An empty domain leaves the search domain to Proxmox.
+configure_guests_domain: "{{ ansible_facts.domain | default('') }}"
+configure_guests_nameservers: [1.1.1.1, 1.0.0.1]
