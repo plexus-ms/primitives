@@ -1,0 +1,27 @@
+#!/bin/sh
+# Suppress the "No valid subscription" dialog in the Proxmox web UIs (VE and
+# Backup Server share the file): its checked_command wrapper is patched to run
+# the wrapped action right away.
+# A proxmox-widget-toolkit upgrade restores the file, so apt re-runs this
+# script after every dpkg run (/etc/apt/apt.conf.d/90-no-subscription-notice).
+set -eu
+
+f=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+patched='function ?\(orig_cmd\) \{\n\torig_cmd\(\);\n\treturn;'
+
+[ -f "$f" ] || exit 0
+if grep -qzP "$patched" "$f"; then
+    echo unchanged
+    exit 0
+fi
+
+sed -Ezi 's/(function ?\(orig_cmd\) \{)/\1\n\torig_cmd();\n\treturn;/' "$f"
+if ! grep -qzP "$patched" "$f"; then
+    echo "checked_command not found in $f; the patch no longer matches this version" >&2
+    exit 1
+fi
+# Whichever of the two products is installed; the backup proxy reloads
+# without dropping running tasks.
+systemctl try-restart pveproxy.service 2>/dev/null || true
+systemctl try-reload-or-restart proxmox-backup-proxy.service 2>/dev/null || true
+echo patched

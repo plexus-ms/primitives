@@ -1,0 +1,55 @@
+# {{ ansible_managed }}
+# Layer-4 router: no TLS here. 443 by SNI, 80 by Host; the tenant VMs' Caddy
+# terminates TLS and answers ACME challenges as on any Plexus host. HTTPS
+# backend connections start with a PROXY protocol v2 header, so Caddy sees the
+# real peer (Cloudflare's edge, or the client) instead of this VM; port 80 is
+# only redirects and ACME challenges, and Caddy's implicit port-80 server does
+# not read the header, so it gets plain connections.
+global
+    log /dev/log local0
+    maxconn 4096
+    user haproxy
+    group haproxy
+    daemon
+
+defaults
+    log global
+    option dontlognull
+    timeout connect 5s
+    timeout client 60s
+    timeout server 60s
+
+frontend http
+    bind :80
+    mode http
+    option httplog
+    option forwardfor
+{% for b in configure_haproxy_backends %}
+    use_backend {{ b.name }}_http if { req.hdr(host),host_only -m str -i {{ b.hosts | join(' ') }} }
+{% endfor %}
+    default_backend no_route
+
+frontend https
+    bind :443
+    mode tcp
+    option tcplog
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+{% for b in configure_haproxy_backends %}
+    use_backend {{ b.name }}_https if { req.ssl_sni -m str -i {{ b.hosts | join(' ') }} }
+{% endfor %}
+    # no matching SNI: the connection is closed
+
+backend no_route
+    mode http
+    http-request return status 421 content-type text/plain string "unknown host"
+{% for b in configure_haproxy_backends %}
+
+backend {{ b.name }}_http
+    mode http
+    server {{ b.name }} {{ b.address }}:80 check
+
+backend {{ b.name }}_https
+    mode tcp
+    server {{ b.name }} {{ b.address }}:443 check send-proxy-v2
+{% endfor %}

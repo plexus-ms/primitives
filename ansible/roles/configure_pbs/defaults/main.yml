@@ -1,0 +1,82 @@
+---
+# Proxmox Backup Server on a plain Debian host: the server package only, the
+# distribution's kernel stays. The hypervisor pushes guest backups to it.
+
+# PBS always listens on every address (port 8007); it cannot be bound to one.
+# The host firewall (configure_firewall) keeps it off the public interface: it
+# admits the port only on its trusted interfaces, e.g. the overlay network.
+
+# The datastore the hypervisor backs up to, and the namespaces in it (one per
+# tenant whose guests land here).
+configure_pbs_datastore: main
+configure_pbs_datastore_path: /srv/pbs/main
+configure_pbs_namespaces: []
+
+# PBS prunes by itself; the clients may only add backups. Garbage collection
+# frees the chunks pruning released; verification re-reads every chunk once
+# and again after the given number of days.
+configure_pbs_prune_schedule: "06:00"
+configure_pbs_keep_daily: 7
+configure_pbs_keep_weekly: 4
+configure_pbs_keep_monthly: 6
+configure_pbs_gc_schedule: "sat 07:00"
+configure_pbs_verify_schedule: "sun 07:00"
+configure_pbs_verify_outdated_after_days: 30
+
+# Clients that push backups: a user in the pbs realm with one API token each
+# and the DatastoreBackup role on the datastore (add and read own backups,
+# never prune or delete). The token is generated once by hand, because PBS
+# shows its secret a single time.
+#   configure_pbs_clients:
+#     - user: srv01
+#       token: backup
+configure_pbs_clients: []
+
+# Web UI admins: <name>@pam with the Admin role. Like on Proxmox VE the pam
+# realm checks the Linux password (`sudo passwd <name>`), and TOTP is
+# registered by each admin in the UI.
+configure_pbs_admins: "{{ configure_iam_admins | default([]) | map(attribute='name') | list }}"
+
+# Disable root@pam for the web UI and API once there are admins, as on Proxmox
+# VE. The local CLI keeps working, except for the few calls that log in to the
+# API as root@pam (proxmox-backup-debug api, task list).
+configure_pbs_disable_root_pam: true
+
+# Off-site copy: a second datastore whose chunks live in an S3 bucket, filled
+# from the first by a sync job on this host and pruned by the same rules. It
+# is not verified here (every read is a download); the restore drill reads it.
+# An empty bucket name means no off-site copy. In the endpoint, PBS itself
+# replaces {{bucket}} and {{region}}.
+configure_pbs_offsite_bucket: ""
+configure_pbs_offsite_endpoint: ""
+configure_pbs_offsite_region: ""
+configure_pbs_offsite_access_key: ""
+configure_pbs_offsite_secret_key: ""
+configure_pbs_offsite_datastore: offsite
+configure_pbs_offsite_cache_path: /srv/pbs/offsite-cache # local cache the S3 backend needs
+configure_pbs_offsite_sync_schedule: "05:30"
+configure_pbs_offsite_prune_schedule: "06:30"
+configure_pbs_offsite_gc_schedule: "sat 09:00"
+
+# Patch the web UI so it stops showing the "No valid subscription" dialog; the
+# tasks are configure_proxmox's (the vendor file is the same on both).
+configure_pbs_suppress_subscription_notice: true
+
+# Notifications, as in configure_proxmox: with an SMTP relay given here,
+# warnings and failures (not successes) go to a real mailbox and the built-in
+# matcher (local root mail) is disabled. Empty leaves the system as shipped.
+#   configure_pbs_alerts_smtp:
+#     server: smtp.example.org
+#     port: 587
+#     mode: starttls            # insecure | starttls | tls
+#     username: relay-user
+#     password: relay-password
+#     from_address: host@example.org
+#     mailto: alerts@example.org
+configure_pbs_alerts_smtp: {}
+
+# The check for backups that silently stopped arriving: once a day, mail the
+# alerts mailbox when a group's newest snapshot in any datastore is older than
+# this. Needs configure_pbs_alerts_smtp; 36 h tolerates one late nightly run.
+configure_pbs_snapshot_max_age_hours: 36
+configure_pbs_snapshot_age_time: "08:00"

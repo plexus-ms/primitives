@@ -1,0 +1,71 @@
+---
+# An image may ship Docker; the ingress VM runs no containers, and Docker's
+# own FORWARD policy would fight the NAT rules below.
+- name: Check for Docker
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system/docker.service
+  register: configure_haproxy_docker
+
+- name: Stop and disable Docker
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+    masked: true
+  loop:
+    - docker.service
+    - docker.socket
+    - containerd.service
+  when: configure_haproxy_docker.stat.exists
+
+- name: Install HAProxy
+  ansible.builtin.apt:
+    name: haproxy
+    state: present
+
+- name: Forward IPv4 between the interfaces
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_file: /etc/sysctl.d/90-ingress-forward.conf
+    state: present
+
+# The input rules join the host firewall's table; forwarding and NAT are this
+# role's own table, replaced whole on every load like the firewall's.
+# Rendered here, not in the include's vars: those are evaluated inside the
+# other role, which would look for the template in its own directory first.
+- name: Render the routing rules
+  ansible.builtin.set_fact:
+    configure_haproxy_rules: "{{ lookup('ansible.builtin.template', 'haproxy.nft.j2') }}"
+
+- name: Add the routing rules to the host firewall
+  ansible.builtin.include_role:
+    name: plexus.platform.configure_firewall
+    tasks_from: fragment
+  vars:
+    configure_firewall_fragment_name: haproxy
+    configure_firewall_fragment_rules: "{{ configure_haproxy_rules }}"
+
+- name: Note that the routing rules are not loaded yet
+  ansible.builtin.debug:
+    msg: >-
+      The host firewall is not installed, so the routing and NAT rules are
+      written but not loaded; list plexus.platform.configure_firewall after
+      this role.
+  when: configure_firewall_installed.rc != 0
+
+- name: Write the HAProxy configuration
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: Reload haproxy
+
+- name: Enable HAProxy
+  ansible.builtin.systemd_service:
+    name: haproxy
+    enabled: true
+    state: started

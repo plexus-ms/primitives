@@ -7,10 +7,13 @@
     - configure_base
     - configure_deploy_user
     - configure_firewall
+    - configure_haproxy
     - configure_hostname
     - configure_iam
     - configure_ingress
     - configure_mail
+    - configure_pbs
+    - configure_proxmox
     - configure_sshd
     - configure_unattended_upgrades
     - install_alloy

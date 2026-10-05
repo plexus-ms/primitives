@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Mail an alert when a backup group's newest snapshot is too old.
+
+PBS reports a job that fails; it cannot report one that never ran (the
+hypervisor down, its timer gone, the overlay broken). This host sees every
+backup arrive, so it is the one to notice when none does. Run daily by
+pbs-snapshot-age.timer; settings come from the environment
+(/etc/pbs-snapshot-age.env).
+
+  DATASTORE_PATHS  space-separated datastore directories
+  MAX_AGE_HOURS    a group older than this is stale
+  SMTP_SERVER, SMTP_PORT, SMTP_MODE (starttls | tls | insecure),
+  SMTP_USERNAME, SMTP_PASSWORD, MAIL_FROM, MAIL_TO
+
+The datastore is read from disk, which needs no API login: a group is
+[ns/<namespace>/]<type>/<id>/, a snapshot a directory in it named by its
+time, complete once it holds index.json.blob. For an S3-backed datastore the
+directory is its local cache, which holds the same tree.
+
+A group of a guest that no longer exists stays stale until it is removed
+from the datastore; that is the prompt to remove it.
+"""
+
+import os
+import smtplib
+import socket
+import sys
+from datetime import datetime, timezone
+from email.message import EmailMessage
+from pathlib import Path
+
+TYPES = ("vm", "ct", "host")
+
+
+def groups(root):
+    """Yield (name, newest complete snapshot time or None) for every group."""
+    namespaces = [root] + sorted(p for p in (root / "ns").glob("*") if p.is_dir())
+    for ns in namespaces:
+        for kind in TYPES:
+            for group in sorted(p for p in (ns / kind).glob("*") if p.is_dir()):
+                times = []
+                for snapshot in group.iterdir():
+                    if (snapshot / "index.json.blob").is_file():
+                        times.append(datetime.strptime(snapshot.name, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc))
+                yield str(group.relative_to(root.parent)), max(times, default=None)
+
+
+def problems(paths, max_age_hours):
+    now = datetime.now(timezone.utc)
+    found = []
+    for root in paths:
+        try:
+            count = 0
+            for name, newest in groups(root):
+                count += 1
+                if newest is None:
+                    found.append(f"{name}: no complete snapshot")
+                elif (age := (now - newest).total_seconds() / 3600) > max_age_hours:
+                    found.append(f"{name}: newest snapshot is {age:.0f} h old")
+            if count == 0:
+                found.append(f"{root}: no backups at all")
+        except (OSError, ValueError) as error:
+            found.append(f"{root}: could not be read ({error})")
+    return found
+
+
+def send(subject, body):
+    env = os.environ
+    message = EmailMessage()
+    message["From"] = env["MAIL_FROM"]
+    message["To"] = env["MAIL_TO"]
+    message["Subject"] = subject
+    message.set_content(body)
+    port = int(env["SMTP_PORT"])
+    if env.get("SMTP_MODE") == "tls":
+        smtp = smtplib.SMTP_SSL(env["SMTP_SERVER"], port, timeout=30)
+    else:
+        smtp = smtplib.SMTP(env["SMTP_SERVER"], port, timeout=30)
+        if env.get("SMTP_MODE", "starttls") == "starttls":
+            smtp.starttls()
+    with smtp:
+        smtp.login(env["SMTP_USERNAME"], env["SMTP_PASSWORD"])
+        smtp.send_message(message)
+
+
+def main():
+    paths = [Path(p) for p in os.environ["DATASTORE_PATHS"].split()]
+    max_age_hours = float(os.environ["MAX_AGE_HOURS"])
+    found = problems(paths, max_age_hours)
+    if not found:
+        print(f"every group in {', '.join(map(str, paths))} is younger than {max_age_hours:.0f} h")
+        return 0
+    body = "\n".join(found)
+    print(body, file=sys.stderr)
+    host = socket.gethostname()
+    send(f"[{host}] backups are stale", f"Older than {max_age_hours:.0f} h on {host}:\n\n{body}\n")
+    # Reported; a non-zero exit is for the check itself failing (see OnFailure).
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

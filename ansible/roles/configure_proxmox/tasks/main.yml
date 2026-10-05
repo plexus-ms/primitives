@@ -1,0 +1,410 @@
+---
+- name: Proxmox users for the admins
+  ansible.builtin.import_tasks: users.yml
+
+# ── web UI on the overlay only ──────────────────────────────────────────────
+# Facts are re-read here because the play's own fact gathering may predate the
+# interface (a first run joins NetBird in the same play).
+- name: Read network facts
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - "!min"
+      - network
+
+- name: Fail when the listen interface has no IPv4 address
+  ansible.builtin.assert:
+    that: ansible_facts[configure_proxmox_listen_interface].ipv4.address is defined
+    fail_msg: >-
+      Interface {{ configure_proxmox_listen_interface }} has no IPv4 address;
+      run the install_and_join_netbird role first or set configure_proxmox_listen_interface.
+
+# pveproxy binds to the overlay address, which does not exist yet when pveproxy
+# starts at boot; this lets it bind before the interface is up.
+- name: Allow binding to an address that is not up yet
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    sysctl_file: /etc/sysctl.d/90-pveproxy-nonlocal-bind.conf
+    state: present
+
+- name: Bind the web UI and SPICE proxy to the listen interface's address
+  ansible.builtin.copy:
+    dest: /etc/default/pveproxy
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Web UI (8006) and SPICE proxy (3128) listen on the NetBird address only.
+      LISTEN_IP="{{ ansible_facts[configure_proxmox_listen_interface].ipv4.address }}"
+  notify: Restart pveproxy and spiceproxy
+
+# ── public listeners Proxmox brings along ───────────────────────────────────
+# Postfix (Proxmox brings it along) is bound to loopback by configure_mail.
+# rpcbind (port 111) is only needed for NFS storage.
+- name: Stop and disable rpcbind
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - rpcbind.socket
+    - rpcbind.service
+
+# ── subscription notice ─────────────────────────────────────────────────────
+- name: Suppress the subscription notice
+  ansible.builtin.include_tasks: subscription_notice.yml
+  when: configure_proxmox_suppress_subscription_notice
+
+# ── storage ─────────────────────────────────────────────────────────────────
+- name: Set ZFS pool properties
+  community.general.zfs:
+    name: "{{ configure_proxmox_zfs_pool }}"
+    state: present
+    extra_zfs_properties:
+      compression: "on"   # lz4; datasets inherit it
+      atime: "off"        # no metadata write per read
+
+- name: Read the pool's autotrim setting
+  ansible.builtin.command:
+    cmd: zpool get -H -o value autotrim {{ configure_proxmox_zfs_pool }}
+  register: configure_proxmox_autotrim
+  changed_when: false
+  check_mode: false
+
+- name: Enable autotrim on the pool
+  ansible.builtin.command:
+    cmd: zpool set autotrim=on {{ configure_proxmox_zfs_pool }}
+  when: configure_proxmox_autotrim.stdout != 'on'
+  changed_when: true
+
+# Mounted (the pool itself is not) because container root disks are datasets
+# under it, which Proxmox expects to find mounted below their parent.
+- name: Create the dataset for guest disks
+  community.general.zfs:
+    name: "{{ configure_proxmox_zfs_vm_dataset }}"
+    state: present
+    extra_zfs_properties:
+      mountpoint: /{{ configure_proxmox_zfs_vm_dataset }}
+
+- name: Read the Proxmox storage configuration
+  ansible.builtin.command:
+    cmd: pvesh get /storage --output-format json
+  register: configure_proxmox_storages
+  changed_when: false
+  check_mode: false
+
+- name: Register the dataset as zfspool storage
+  ansible.builtin.command:
+    cmd: >-
+      pvesm add zfspool {{ configure_proxmox_zfs_vm_storage }}
+      --pool {{ configure_proxmox_zfs_vm_dataset }} --content images,rootdir --sparse 1
+  when: configure_proxmox_zfs_vm_storage not in (configure_proxmox_storages.stdout | from_json | map(attribute='storage'))
+  changed_when: true
+
+- name: Limit the dir storage to file content
+  ansible.builtin.command:
+    cmd: pvesm set local --content {{ configure_proxmox_dir_storage_content }}
+  when: >-
+    (configure_proxmox_storages.stdout | from_json | selectattr('storage', 'equalto', 'local') | map(attribute='content') | first | split(',') | sort)
+    != (configure_proxmox_dir_storage_content | split(',') | sort)
+  changed_when: true
+
+- name: Cap the ZFS ARC at boot
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/zfs.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # ZFS read cache: {{ configure_proxmox_zfs_arc_max_gib }} GiB, the rest of the RAM is for guests.
+      options zfs zfs_arc_max={{ configure_proxmox_zfs_arc_max_gib * 1024 * 1024 * 1024 }}
+  notify: Update initramfs
+
+- name: Read the running ARC cap
+  ansible.builtin.command:
+    cmd: cat /sys/module/zfs/parameters/zfs_arc_max
+  register: configure_proxmox_arc_max
+  changed_when: false
+  check_mode: false
+
+- name: Cap the ZFS ARC now
+  ansible.builtin.shell:
+    cmd: echo {{ configure_proxmox_zfs_arc_max_gib * 1024 * 1024 * 1024 }} > /sys/module/zfs/parameters/zfs_arc_max
+  when: configure_proxmox_arc_max.stdout | int != configure_proxmox_zfs_arc_max_gib * 1024 * 1024 * 1024
+  changed_when: true
+
+- name: Remove swap from fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^\S+\s+\S+\s+swap\s'
+    state: absent
+  when: not configure_proxmox_swap
+
+- name: Read active swap
+  ansible.builtin.command:
+    cmd: swapon --noheadings --show=NAME
+  register: configure_proxmox_swapon
+  changed_when: false
+  check_mode: false
+  when: not configure_proxmox_swap
+
+- name: Turn swap off
+  ansible.builtin.command:
+    cmd: swapoff -a
+  when:
+    - not configure_proxmox_swap
+    - configure_proxmox_swapon.stdout | length > 0
+  changed_when: true
+
+# ── internal guest bridge ───────────────────────────────────────────────────
+# Through Proxmox's own API rather than editing /etc/network/interfaces, which
+# Proxmox rewrites; "set" applies the pending change with ifreload.
+- name: Read the host's network interfaces
+  ansible.builtin.command:
+    cmd: pvesh get /nodes/{{ ansible_facts.hostname }}/network --output-format json
+  register: configure_proxmox_ifaces
+  changed_when: false
+  check_mode: false
+
+- name: Create the internal guest bridge
+  ansible.builtin.command:
+    cmd: >-
+      pvesh create /nodes/{{ ansible_facts.hostname }}/network
+      --iface {{ configure_proxmox_internal_bridge }} --type bridge --autostart 1
+      --comments "internal guest bridge: no host address; the ingress VM is its gateway"
+  when: configure_proxmox_internal_bridge not in (configure_proxmox_ifaces.stdout | from_json | map(attribute='iface'))
+  changed_when: true
+  notify: Apply network changes
+
+# ── firewall ────────────────────────────────────────────────────────────────
+# /etc/pve is a FUSE file system that refuses chmod and chown, which makes
+# Ansible's file modules fail after writing. The files are therefore staged on
+# a normal file system (where check mode and --diff work as usual) and written
+# into /etc/pve by plain shell redirection when they differ. pve-firewall picks
+# up a change within seconds; no restart is needed.
+- name: Create the staging directory
+  ansible.builtin.file:
+    path: /var/lib/pve-firewall/staged
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Stage the firewall files
+  ansible.builtin.copy:
+    dest: "/var/lib/pve-firewall/staged/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0640"
+    content: "{{ item.content }}"
+  loop:
+    - name: cluster.fw
+      content: |
+        [OPTIONS]
+
+        enable: 1
+        policy_in: DROP
+        policy_out: ACCEPT
+
+        [ALIASES]
+
+        local_network {{ configure_proxmox_listen.network }}/{{ configure_proxmox_listen.prefix }} # admin access (SSH, web UI, SPICE) only from the overlay
+
+        [RULES]
+
+        IN ACCEPT -i {{ configure_proxmox_listen_interface }} -log nolog # everything from the overlay
+        {% for port in configure_proxmox_firewall_public_tcp %}
+        IN ACCEPT -p tcp -dport {{ port }} -log nolog
+        {% endfor %}
+        {% for port in configure_proxmox_firewall_public_udp %}
+        IN ACCEPT -p udp -dport {{ port }} -log nolog
+        {% endfor %}
+        IN Ping(ACCEPT) -log nolog
+    - name: host.fw
+      content: |
+        [OPTIONS]
+
+        enable: 1
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    configure_proxmox_listen: "{{ ansible_facts[configure_proxmox_listen_interface].ipv4 }}"
+
+- name: Compare the staged files with /etc/pve
+  ansible.builtin.command:
+    cmd: cmp -s /var/lib/pve-firewall/staged/{{ item.name }} {{ item.dest }}
+  loop:
+    - { name: cluster.fw, dest: /etc/pve/firewall/cluster.fw }
+    - { name: host.fw, dest: "/etc/pve/nodes/{{ ansible_facts.hostname }}/host.fw" }
+  loop_control:
+    label: "{{ item.dest }}"
+  register: configure_proxmox_fw_cmp
+  changed_when: false
+  failed_when: configure_proxmox_fw_cmp.rc > 2
+  check_mode: false
+
+- name: Write the firewall files into /etc/pve
+  ansible.builtin.shell:
+    cmd: cat /var/lib/pve-firewall/staged/{{ item.item.name }} > {{ item.item.dest }}
+  loop: "{{ configure_proxmox_fw_cmp.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  when: item.rc != 0
+  changed_when: true
+
+- name: Check that the rule set compiles
+  ansible.builtin.command:
+    cmd: pve-firewall compile
+  changed_when: false
+  register: configure_proxmox_fw_compile
+  failed_when: configure_proxmox_fw_compile.rc != 0 or 'error' in configure_proxmox_fw_compile.stderr | lower
+
+# ── guest backups ───────────────────────────────────────────────────────────
+- name: Guest backups to Proxmox Backup Server
+  when: configure_proxmox_pbs_server | length > 0
+  block:
+    - name: Fail when the token secret or the encryption key is missing
+      ansible.builtin.assert:
+        that:
+          - configure_proxmox_pbs_token_secret | length > 0
+          - (configure_proxmox_pbs_encryption_key | from_json).data is defined
+        fail_msg: PBS_TOKEN_SECRET or PBS_ENCRYPTION_KEY did not resolve; run through ./ansible-playbookw.
+        quiet: true
+      no_log: true
+
+    # Proxmox copies the key to /etc/pve/priv/storage/<id>.enc when the storage
+    # is added; this file is only the hand-over, on tmpfs.
+    - name: Hand the encryption key over
+      ansible.builtin.copy:
+        dest: /run/pbs-encryption-key.json
+        owner: root
+        group: root
+        mode: "0600"
+        content: "{{ configure_proxmox_pbs_encryption_key }}"
+      changed_when: false
+      no_log: true
+
+    - name: Register the PBS storages
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - add
+          - pbs
+          - "{{ item.id }}"
+          - --server
+          - "{{ configure_proxmox_pbs_server }}"
+          - --fingerprint
+          - "{{ configure_proxmox_pbs_fingerprint }}"
+          - --datastore
+          - "{{ configure_proxmox_pbs_datastore }}"
+          - --namespace
+          - "{{ item.namespace }}"
+          - --username
+          - "{{ configure_proxmox_pbs_token_id }}"
+          - --password
+          - "{{ configure_proxmox_pbs_token_secret }}"
+          - --encryption-key
+          - /run/pbs-encryption-key.json
+          - --content
+          - backup
+          - --prune-backups
+          - keep-all=1
+      when: item.id not in (configure_proxmox_storages.stdout | from_json | map(attribute='storage'))
+      changed_when: true
+      no_log: true
+      loop: "{{ configure_proxmox_pbs_storages }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Remove the handed-over key
+      ansible.builtin.file:
+        path: /run/pbs-encryption-key.json
+        state: absent
+      changed_when: false
+
+    - name: Read the backup jobs
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/backup --output-format json
+      register: configure_proxmox_backup_jobs_now
+      changed_when: false
+      check_mode: false
+
+    # Snapshot mode: the guest keeps running and the guest agent freezes its
+    # file systems for the moment the backup starts.
+    - name: Create the backup jobs
+      ansible.builtin.command:
+        cmd: >-
+          pvesh create /cluster/backup --id {{ item.id }}
+          --storage {{ item.storage }} --vmid {{ item.vmids | join(',') }}
+          --schedule "{{ item.schedule }}" --mode snapshot --enabled 1
+          --notes-template "{{ '{{guestname}}' }}"
+      when: item.id not in (configure_proxmox_backup_jobs_now.stdout | from_json | map(attribute='id'))
+      changed_when: true
+      loop: "{{ configure_proxmox_backup_jobs }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+# ── notifications ───────────────────────────────────────────────────────────
+- name: Notifications to a real mailbox
+  when: configure_proxmox_alerts_smtp | length > 0
+  block:
+    - name: Read the SMTP endpoints
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/notifications/endpoints/smtp --output-format json
+      register: configure_proxmox_smtp_endpoints
+      changed_when: false
+      check_mode: false
+
+    - name: Create the SMTP endpoint
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - create
+          - /cluster/notifications/endpoints/smtp
+          - --name
+          - smtp
+          - --server
+          - "{{ configure_proxmox_alerts_smtp.server }}"
+          - --port
+          - "{{ configure_proxmox_alerts_smtp.port }}"
+          - --mode
+          - "{{ configure_proxmox_alerts_smtp.mode }}"
+          - --username
+          - "{{ configure_proxmox_alerts_smtp.username }}"
+          - --password
+          - "{{ configure_proxmox_alerts_smtp.password }}"
+          - --from-address
+          - "{{ configure_proxmox_alerts_smtp.from_address }}"
+          - --mailto
+          - "{{ configure_proxmox_alerts_smtp.mailto }}"
+      when: "'smtp' not in (configure_proxmox_smtp_endpoints.stdout | from_json | map(attribute='name'))"
+      changed_when: true
+      no_log: true
+
+    # Endpoints and matchers share one namespace, hence the two names.
+    - name: Read the matchers
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/notifications/matchers --output-format json
+      register: configure_proxmox_matchers
+      changed_when: false
+      check_mode: false
+
+    - name: Route warnings and failures to the endpoint
+      ansible.builtin.command:
+        cmd: >-
+          pvesh create /cluster/notifications/matchers --name alerts --target smtp
+          --match-severity warning,error,unknown
+          --comment "Warnings and failures to the alerts mailbox"
+      when: "'alerts' not in (configure_proxmox_matchers.stdout | from_json | map(attribute='name'))"
+      changed_when: true
+
+    - name: Disable the built-in matcher
+      ansible.builtin.command:
+        cmd: pvesh set /cluster/notifications/matchers/default-matcher --disable 1
+      when: >-
+        configure_proxmox_matchers.stdout | from_json
+        | selectattr('name', 'equalto', 'default-matcher')
+        | rejectattr('disable', 'defined')
+        | list | length > 0
+      changed_when: true

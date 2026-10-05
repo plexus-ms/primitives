@@ -1,0 +1,27 @@
+---
+# Patches the web UI so it stops showing the "No valid subscription" dialog.
+# Proxmox VE and Proxmox Backup Server share the vendor file, so configure_pbs
+# includes these tasks too (include_role, tasks_from).
+- name: Install the subscription-notice patch script
+  ansible.builtin.copy:
+    src: pve-no-subscription-notice
+    dest: /usr/local/sbin/pve-no-subscription-notice
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Re-apply the patch after every apt run
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/90-no-subscription-notice
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // proxmox-widget-toolkit upgrades restore proxmoxlib.js; patch it again.
+      DPkg::Post-Invoke { "/usr/local/sbin/pve-no-subscription-notice"; };
+
+- name: Apply the patch
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/pve-no-subscription-notice
+  register: configure_proxmox_notice
+  changed_when: configure_proxmox_notice.stdout == 'patched'

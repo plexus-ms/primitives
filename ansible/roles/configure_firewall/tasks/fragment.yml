@@ -41,10 +41,25 @@
   failed_when: false
   check_mode: false
 
-# On every run, so a fragment that failed to load once fails again instead of
-# passing unnoticed.
-- name: Load the firewall rules with the fragment
-  ansible.builtin.command:
-    cmd: nft -f /etc/nftables.conf
+# On every run, so the live rules equal the files. A fragment the rules do not
+# load with is removed again: left on disk it would keep the whole firewall
+# from loading at the next boot.
+- name: Load the fragment
   when: configure_firewall_installed.rc == 0
-  changed_when: configure_firewall_fragment is changed
+  block:
+    - name: Load the firewall rules with the fragment
+      ansible.builtin.command:
+        cmd: nft -f /etc/nftables.conf
+      changed_when: configure_firewall_fragment is changed
+  rescue:
+    - name: Remove the fragment that does not load
+      ansible.builtin.file:
+        path: /etc/nftables.d/{{ configure_firewall_fragment_name }}.nft
+        state: absent
+
+    - name: Fail
+      ansible.builtin.fail:
+        msg: >-
+          The firewall does not load with the fragment
+          {{ configure_firewall_fragment_name }}; the fragment was removed and
+          the previous rules are still in force.

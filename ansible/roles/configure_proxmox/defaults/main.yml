@@ -1,0 +1,86 @@
+---
+# Admins of the web UI and API: the names of Linux accounts that exist on the
+# host (plexus.platform.configure_iam creates them).
+configure_proxmox_admins: "{{ configure_iam_admins | default([]) }}"
+
+# Disable root@pam for the web UI and API; admins use their own accounts.
+# Break-glass is the console as root: `pveum user modify root@pam --enable 1`.
+configure_proxmox_disable_root_pam: true
+
+# Interface whose IPv4 address the web UI (8006) and SPICE proxy (3128) listen
+# on. wt0 is the NetBird overlay, so the install_and_join_netbird role has to run first.
+configure_proxmox_listen_interface: wt0
+
+# Proxmox firewall (datacenter level): inbound default-drop. Besides the ports
+# below, Proxmox's built-in management rules admit SSH, the web UI, SPICE and
+# migration from its "local_network", which the role pins to the listen
+# interface's network (the overlay). Left to auto-detection, Proxmox takes the
+# host's public /24, i.e. the hoster's neighbours.
+configure_proxmox_firewall_public_tcp:
+  - 22    # SSH stays public until the overlay has proven itself
+configure_proxmox_firewall_public_udp:
+  - 51820 # WireGuard: lets NetBird peers connect directly instead of via relay
+
+# Patch the web UI so it stops showing the "No valid subscription" dialog.
+# The patch edits a vendor file; the alternative is a Community subscription.
+configure_proxmox_suppress_subscription_notice: true
+
+# Storage. A provider's Proxmox image may leave a ZFS pool (here "data") with
+# one dataset for /var/lib/vz and register only the default "local" dir
+# storage, so guest disks would land as files on ZFS. The role adds a dataset for zvols and
+# registers it as Proxmox's local-zfs storage; "local" keeps the file content.
+configure_proxmox_zfs_pool: data
+configure_proxmox_zfs_vm_dataset: data/vms
+configure_proxmox_zfs_vm_storage: local-zfs
+configure_proxmox_dir_storage_content: iso,vztmpl,backup,snippets
+
+# ZFS's read cache (ARC) may otherwise take almost all RAM, which belongs to
+# the guests. 8 GiB is plenty for a few hundred GB of guest disks.
+configure_proxmox_zfs_arc_max_gib: 8
+
+# Swap on an unmirrored partition can take the host down when that drive
+# fails, and a host with RAM to spare does not need swap: off, and out of fstab.
+configure_proxmox_swap: false
+
+# Internal guest bridge: a plain switch with no address on the host, so the
+# host's own addresses never carry guest traffic. The ingress VM is the
+# bridge's gateway and NAT (configure_haproxy); service VMs live on it only.
+configure_proxmox_internal_bridge: vmbr1
+
+# Guest backups to a Proxmox Backup Server. One storage per PBS namespace, all
+# on the same server and datastore with the same API token; a job backs up its
+# guests to one storage every night. Retention is the server's: the token may
+# only add backups. Backups are encrypted on this host with the key below (a
+# proxmox-backup-client key file as JSON, kept in the vault), so the server
+# and whatever it syncs to hold ciphertext only. An empty server means no
+# backups.
+#   configure_proxmox_pbs_storages:
+#     - id: pbs-acme
+#       namespace: acme
+#   configure_proxmox_backup_jobs:
+#     - id: backup-acme
+#       storage: pbs-acme
+#       vmids: [100, 101]
+#       schedule: "04:15"
+configure_proxmox_pbs_server: ""
+configure_proxmox_pbs_fingerprint: "" # of the server's certificate (sha256); it is self-signed
+configure_proxmox_pbs_datastore: main
+configure_proxmox_pbs_token_id: ""     # user@realm!token
+configure_proxmox_pbs_token_secret: ""
+configure_proxmox_pbs_encryption_key: ""
+configure_proxmox_pbs_storages: []
+configure_proxmox_backup_jobs: []
+
+# Notifications. Proxmox routes everything to the local root mailbox, which
+# nobody reads. With an SMTP relay given here, warnings and failures (not
+# successes) go to a real mailbox and the built-in matcher is disabled. Empty
+# leaves the notification system as shipped.
+#   configure_proxmox_alerts_smtp:
+#     server: smtp.example.org
+#     port: 587
+#     mode: starttls            # insecure | starttls | tls
+#     username: relay-user
+#     password: relay-password
+#     from_address: host@example.org
+#     mailto: alerts@example.org
+configure_proxmox_alerts_smtp: {}

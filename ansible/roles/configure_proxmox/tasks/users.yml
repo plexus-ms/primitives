@@ -1,0 +1,57 @@
+---
+# Every admin gets a Proxmox user <name>@pam with the Administrator role. The
+# pam realm checks the Linux password, which no role sets: each admin sets
+# their own once with `sudo passwd <name>`.
+- name: Read Proxmox users
+  ansible.builtin.command:
+    cmd: pveum user list --output-format json
+  register: configure_proxmox_pve_users
+  changed_when: false
+  check_mode: false
+
+- name: Create the Proxmox users
+  ansible.builtin.command:
+    cmd: pveum user add {{ item.name }}@pam
+  when: (item.name ~ '@pam') not in (configure_proxmox_pve_users.stdout | from_json | map(attribute='userid'))
+  changed_when: true
+  loop: "{{ configure_proxmox_admins }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read Proxmox ACLs
+  ansible.builtin.command:
+    cmd: pveum acl list --output-format json
+  register: configure_proxmox_pve_acls
+  changed_when: false
+  check_mode: false
+
+- name: Grant the Administrator role on /
+  ansible.builtin.command:
+    cmd: pveum acl modify / --users {{ item.name }}@pam --roles Administrator
+  when: >-
+    configure_proxmox_pve_acls.stdout | from_json
+    | selectattr('path', 'equalto', '/')
+    | selectattr('ugid', 'equalto', item.name ~ '@pam')
+    | selectattr('roleid', 'equalto', 'Administrator')
+    | list | length == 0
+  changed_when: true
+  loop: "{{ configure_proxmox_admins }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Done after the admins exist, so there is always a web UI login left. A few
+# node-level operations are hard-wired to root@pam (custom certificate upload,
+# for one); re-enable it from the console for those.
+- name: Disable root@pam
+  ansible.builtin.command:
+    cmd: pveum user modify root@pam --enable 0
+  when:
+    - configure_proxmox_disable_root_pam
+    - (configure_proxmox_pve_users.stdout | from_json | selectattr('userid', 'equalto', 'root@pam') | map(attribute='enable') | first | int) == 1
+  changed_when: true
+
+# ── 2FA for the web UI ──────────────────────────────────────────────────────
+# TOTP is registered by each admin themselves (Datacenter → Permissions → Two
+# Factor); the secret is theirs, not the repo's. Passkeys were ruled out for
+# now: they need a host name with a trusted certificate, and the UI is reached
+# by its NetBird address.

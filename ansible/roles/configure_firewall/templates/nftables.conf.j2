@@ -23,6 +23,9 @@ table inet firewall {
 {% if configure_firewall_public_tcp | length > 0 %}
         tcp dport { {{ configure_firewall_public_tcp | join(', ') }} } accept
 {% endif %}
+{% if configure_firewall_public_udp | length > 0 %}
+        udp dport { {{ configure_firewall_public_udp | join(', ') }} } accept
+{% endif %}
     }
 }
 

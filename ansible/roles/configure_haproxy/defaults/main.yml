@@ -1,0 +1,21 @@
+---
+# The ingress VM: holds a public IPv4 address, routes inbound TCP to the
+# tenant VMs on an internal bridge, and is their gateway and NAT for outbound
+# traffic. It terminates nothing: 443 is routed by TLS SNI and 80 by the Host
+# header, so every tenant VM keeps its own Caddy and certificates (§ 7.1 PLX).
+# List plexus.platform.configure_firewall after this role: the rules below
+# are a fragment of the host firewall.
+configure_haproxy_public_interface: eth0
+configure_haproxy_internal_interface: eth1
+configure_haproxy_internal_network: 10.10.0.0/24
+
+# Tenant VMs behind the ingress: the host names that reach each one, and
+# optionally a public port forwarded to the VM's SSH (§ 8.4 PLX deploys).
+#   - name: vm101
+#     address: 10.10.0.11
+#     hosts: [example.org, www.example.org]
+#     ssh_port: 2101
+configure_haproxy_backends: []
+# Ports this role opens on the ingress VM, besides the forwarded SSH ports.
+# SSH to the VM itself is the host firewall's (configure_firewall_public_tcp).
+configure_haproxy_public_tcp: [80, 443]

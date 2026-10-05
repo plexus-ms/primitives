@@ -10,6 +10,10 @@
 # TCP ports open to everyone.
 configure_firewall_public_tcp: [22]
 
+# UDP ports open to everyone, e.g. 51820 so peers of a WireGuard-based overlay
+# connect directly instead of through a relay.
+configure_firewall_public_udp: []
+
 # Interfaces whose traffic is accepted whole, e.g. an overlay network's
 # interface (wt0 for NetBird) or an internal bridge.
 configure_firewall_trusted_interfaces: []
