@@ -12,6 +12,10 @@ configure_base_packages:
   - python3-debian
   - acl
 
+# Extra packages a particular host needs on top of the common set, e.g. a DHCP
+# client an image left out. Appended to the list above. Per host in host_vars.
+configure_base_packages_extra: []
+
 # Packages to purge, e.g. a provider image's DNS server listening on the
 # public address. Per host in host_vars.
 configure_base_packages_absent: []
