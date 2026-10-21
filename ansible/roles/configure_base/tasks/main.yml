@@ -43,6 +43,54 @@
       MaxRetentionSec={{ configure_base_journal_retention }}
   notify: Restart journald
 
+- name: Record system activity with sysstat
+  when: configure_base_sysstat
+  block:
+    - name: Answer Debian's question whether sysstat collects
+      ansible.builtin.debconf:
+        name: sysstat
+        question: sysstat/enable
+        value: "true"
+        vtype: boolean
+
+    - name: Install sysstat
+      ansible.builtin.apt:
+        name: sysstat
+        state: present
+
+    - name: Create the collect timer drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/sysstat-collect.timer.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Set the sampling interval
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/sysstat-collect.timer.d/10-plexus.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Timer]
+          OnCalendar=
+          OnCalendar=*:00/{{ configure_base_sysstat_interval }}
+      notify:
+        - Reload systemd
+        - Restart the sysstat collect timer
+
+    - name: Enable and start the collector and its timers
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - sysstat.service
+        - sysstat-collect.timer
+        - sysstat-summary.timer
+        - sysstat-rotate.timer
+
 - name: Harden the kernel configuration
   when: configure_base_kernel_hardening
   block:

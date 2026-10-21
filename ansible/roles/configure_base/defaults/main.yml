@@ -1,7 +1,7 @@
 ---
 # What every host has in common before anything else is installed: a current
-# apt cache, a few packages, a timezone, a bounded journal, and a hardened
-# kernel configuration.
+# apt cache, a few packages, a timezone, a bounded journal, a record of system
+# activity, and a hardened kernel configuration.
 
 # Packages every host gets. The first four are what the collection's own
 # modules need on the host (deb822_repository, become_user).
@@ -26,6 +26,14 @@ configure_base_timezone: Etc/UTC
 # fill the disk.
 configure_base_journal_max_use: 1G
 configure_base_journal_retention: 90day
+
+# sysstat samples CPU, memory, disk and network on the host itself, so `sar`
+# answers "was this host under load on Tuesday?" without a telemetry stack.
+# Debian's retention of seven days is kept: it lives in a conffile, and an
+# edited conffile makes unattended-upgrades hold the package back.
+configure_base_sysstat: true
+# Minutes between two samples; Debian's default is ten.
+configure_base_sysstat_interval: 2
 
 # sysctl hardening and a blocklist of rarely used protocols and filesystems.
 # IP forwarding is not touched: Docker, an overlay network and a router each
