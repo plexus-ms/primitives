@@ -2,13 +2,13 @@
 # Unattended security upgrades for Debian hosts, hypervisor and guests alike
 # (§ 7.5 PLX). Debian's own 50unattended-upgrades stays in place; the role adds
 # a drop-in on top of it, so the Debian and Debian-Security origins remain and
-# only Debian's stable-updates is added. Packages from other repos (Proxmox,
-# Docker, NetBird) are not touched unless listed below.
+# only Debian's stable-updates is added. The roles that add a repository of
+# their own (install_docker, install_and_join_netbird) hand in its origin as a
+# fragment next to this role's file; Proxmox's repos stay supervised.
 #
 # Further origins to upgrade unattended, in apt's Origins-Pattern syntax:
 #   configure_unattended_upgrades_extra_origins:
-#     - "site=pkgs.netbird.io"
-#     - "origin=Docker"
+#     - "origin=Proxmox"
 configure_unattended_upgrades_extra_origins: []
 
 # Reboot by itself when an upgrade asks for it (kernel, libc). Off for a

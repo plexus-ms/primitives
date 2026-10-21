@@ -5,3 +5,9 @@ install_and_join_netbird_setup_key: "{{ lookup('ansible.builtin.env', 'NETBIRD_S
 
 # Management server to join. Empty = NetBird Cloud
 install_and_join_netbird_management_url: ""
+
+# Let unattended-upgrades (configure_unattended_upgrades) upgrade NetBird too,
+# so the client does not fall behind the management server. The package's
+# postinst restarts the daemon; the overlay interface blinks for a moment and
+# the peer re-ups from its stored config, no setup key involved.
+install_and_join_netbird_unattended_upgrades: true

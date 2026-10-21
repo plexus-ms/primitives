@@ -15,6 +15,21 @@
     state: present
     update_cache: true
 
+# The repository's Release file names Artifactory as origin and label, so the
+# site is the only pattern that singles it out. The file is inert until
+# configure_unattended_upgrades has run; APT merges the list across files.
+- name: Let unattended-upgrades upgrade NetBird
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/53-unattended-upgrades-netbird
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Origins-Pattern {
+          "site=pkgs.netbird.io";
+      };
+  when: install_and_join_netbird_unattended_upgrades
+
 - name: Enable and start the NetBird daemon
   ansible.builtin.systemd_service:
     name: netbird
