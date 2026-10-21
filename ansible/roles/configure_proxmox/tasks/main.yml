@@ -51,6 +51,25 @@
     - rpcbind.socket
     - rpcbind.service
 
+# ── needrestart ─────────────────────────────────────────────────────────────
+# needrestart (configure_unattended_upgrades) restarts every service that
+# runs on an upgraded library, the whole Proxmox stack included. pmxcfs does
+# not stop within its timeout, is killed, and the PVE daemons' stop scripts
+# fail without it: one failure mail per daemon, everything back after a few
+# seconds. The cluster filesystem and corosync keep running on the old
+# library until the supervised reboot; the daemons on top restart fine.
+- name: Keep needrestart off the cluster filesystem and corosync
+  ansible.builtin.copy:
+    dest: /etc/needrestart/conf.d/20-proxmox.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Written by the plexus.platform collection (configure_proxmox).
+      # Never restart pmxcfs or corosync for a library upgrade: pmxcfs hangs on
+      # stop and takes the PVE daemons' stop scripts down with it.
+      $nrconf{override_rc}{qr(^(pve-cluster|corosync))} = 0;
+
 # ── subscription notice ─────────────────────────────────────────────────────
 - name: Suppress the subscription notice
   ansible.builtin.include_tasks: subscription_notice.yml
