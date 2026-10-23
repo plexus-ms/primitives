@@ -1,6 +1,6 @@
 ---
 # Unattended security upgrades for Debian hosts, hypervisor and guests alike
-# (§ 7.5 PLX). Debian's own 50unattended-upgrades stays in place; the role adds
+# (PLX-HostLifecycle). Debian's own 50unattended-upgrades stays in place; the role adds
 # a drop-in on top of it, so the Debian and Debian-Security origins remain and
 # only Debian's stable-updates is added. The roles that add a repository of
 # their own (install_docker, install_and_join_netbird) hand in its origin as a

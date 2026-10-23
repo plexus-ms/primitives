@@ -1,5 +1,5 @@
 ---
-# Rotation closes inside the playbook (§ 7.2 PLX): environment is injected at
+# Rotation closes inside the playbook (PLX-Secrets): environment is injected at
 # container creation, so a rewritten .env or .env.secret rotates a file, not a
 # credential, until the affected containers are re-created. A bare `up -d` —
 # the same invocation the deploy verb and a human use, since compose reads

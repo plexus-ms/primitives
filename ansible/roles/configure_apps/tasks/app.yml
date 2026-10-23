@@ -15,12 +15,12 @@
 # app's source repo (an app repo, or this platform repo's own apps/<name>/ for
 # third-party software) and the deploy verb renders it at deploy time with the
 # image pinned, so the compose file on the host always names the image it
-# serves (§ 5.2 PLX). Three files in the app dir, one writer each (§ 7.2 PLX):
+# serves (§ 2 PLX-App). Three files in the app dir, one writer each (PLX-Secrets):
 # this playbook owns .env and .env.secret; the deploy verb owns compose.yaml.
 # Compose reads .env from the project dir implicitly, so every invocation —
 # the verb's, the rotation handler's, a human's — is a bare `docker compose`.
 
-# .env (§ 5.3, § 7.1 PLX), three sections: compose's own setting, the reserved
+# .env (§ 3 PLX-App, PLX-Ingress), three sections: compose's own setting, the reserved
 # PLEXUS_ bindings, then the non-secret values the inventory provides for the
 # app (`app.env`). The project name defaults to the app dir's basename, which
 # collides the moment two co-hosted tenants deploy an app with the same name
@@ -36,10 +36,10 @@
       # Compose settings.
       COMPOSE_PROJECT_NAME={{ plexus_tenant }}-{{ app.name }}
 
-      # Platform bindings (reserved PLEXUS_ prefix, § 5.4 PLX).
+      # Platform bindings (reserved PLEXUS_ prefix, § 4 PLX-App).
       PLEXUS_LOOPBACK_PORT={{ app.loopback_port }}
 
-      # Values from the inventory record, apps[].env (§ 7.1 PLX).
+      # Values from the inventory record, apps[].env (PLX-Ingress).
       {% for key, value in (app.env | default({})).items() %}
       {{ key }}={{ value }}
       {% endfor %}
@@ -57,7 +57,7 @@
     dest: "{{ configure_apps_dir }}/.env.secret"
     content: |
       # Written by the configure playbook from the tenant inventory, apps[].secrets,
-      # resolved from the vault (§ 7.2 PLX). Do not edit.
+      # resolved from the vault (PLX-Secrets). Do not edit.
       {% for key, ref in app.secrets.items() %}
       {{ key }}={{ lookup('ansible.builtin.pipe', 'op read ' ~ (ref | quote)) }}
       {% endfor %}
@@ -80,7 +80,7 @@
 
 # Nothing to bring up until the deploy verb has placed the run shape: a fresh
 # host stays provisioned-but-empty until the first CI deploy (or a hand-run of
-# the verb), which is the operator's supervised act (§ 8.4 PLX).
+# the verb), which is the operator's supervised act (PLX-Deploy).
 - name: "{{ app.name }} | check whether the deploy verb has placed compose.yaml"
   ansible.builtin.stat:
     path: "{{ configure_apps_dir }}/compose.yaml"

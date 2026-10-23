@@ -12,6 +12,6 @@ install_alloy_project: ""
 # Extra app scrape targets: [{name, address, metrics_path (optional)}]
 install_alloy_scrape_targets: []
 
-# Override slot (§ 8 PLX edge-override pattern): a tenant-provided
+# Override slot (§ 1 PLX-Updates edge-override pattern): a tenant-provided
 # template replaces the stock pipeline wholesale.
 install_alloy_config_template: config.alloy.j2

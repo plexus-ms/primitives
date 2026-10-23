@@ -1,7 +1,7 @@
 ---
 # Host-level settings of the Caddy server, rendered into the root Caddyfile.
 # They describe what sits in front of the host, so every tenant co-hosted on
-# the VM has to set them identically (§ 3.5 PLX keeps that to one tenant).
+# the VM has to set them identically (§ 4 PLX-Tenancy keeps that to one tenant).
 
 # Sources allowed to send the PROXY protocol (v1/v2) ahead of each connection,
 # e.g. a layer-4 ingress VM that routes by SNI. Empty: no PROXY protocol.

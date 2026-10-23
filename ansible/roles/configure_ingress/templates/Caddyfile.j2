@@ -8,9 +8,9 @@
 # from its own root and learns its public URL from its environment.
 #
 # /healthz is readiness for the deploy verb, probed on the host; publicly it
-# would be a dependency-status oracle, so the proxy refuses it (§ 7.1 PLX).
+# would be a dependency-status oracle, so the proxy refuses it (PLX-Ingress).
 # A third-party app declares another path via its plexus.healthz label
-# (§ 5.5 PLX) and mirrors it as `healthz:` in its inventory record, so the
+# (§ 5 PLX-App) and mirrors it as `healthz:` in its inventory record, so the
 # proxy — which has no compose file to read — fences that one too.
 {% for host, apps in plexus_apps | groupby('host') %}
 {{ host }} {

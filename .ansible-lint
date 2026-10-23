@@ -1,7 +1,7 @@
 # ansible-lint over the collection (`mise :check`).
 skip_list:
   # The collection has no changelog; the release train's tag is its version
-  # history (Manual, "the release train").
+  # history (§ 1.5 PLX).
   - galaxy[no-changelog]
   # Per-app tasks are named "<app> | <step>" so a run over several apps reads
   # as one block per app.
