@@ -1,22 +1,12 @@
 ---
-# The app name is the join key across repos (PLX-Ingress): the inventory record,
+# The app name is the join key across repos (§ 3 PLX-Platform): the inventory record,
 # the compose project <tenant>-<app>, and the host dir all key on it, so it is
 # unique per tenant — across every app repo and this platform repo.
 - name: Assert app names are unique per tenant
   ansible.builtin.assert:
     that:
       - plexus_apps | map(attribute='name') | list | unique | length == plexus_apps | length
-    fail_msg: "Duplicate app name in plexus_apps — app names are unique per tenant (PLX-Ingress)."
-
-# Secrets are vault references, never values (PLX-Secrets): every entry of
-# apps[].secrets is an op:// pointer, resolved below at playbook time.
-- name: Assert app secrets are op:// pointers
-  ansible.builtin.assert:
-    that:
-      - >-
-        plexus_apps | map(attribute='secrets', default={}) | map('dict2items') | flatten
-        | map(attribute='value') | reject('match', '^op://') | list | length == 0
-    fail_msg: "Every apps[].secrets value must be an op://vault/item/field pointer (PLX-Secrets) — values never live in git."
+    fail_msg: "Duplicate app name in plexus_apps — app names are unique per tenant (§ 3 PLX-Platform)."
 
 - name: Configure and start each app
   ansible.builtin.include_tasks: app.yml

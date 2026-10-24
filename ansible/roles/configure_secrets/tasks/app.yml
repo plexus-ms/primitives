@@ -1,0 +1,40 @@
+---
+- name: "{{ app.name }} | resolve app dir"
+  ansible.builtin.set_fact:
+    configure_secrets_dir: "{{ plexus_deploy_root }}/{{ plexus_tenant }}/{{ app.name }}"
+
+# The app dir is laid out by configure_apps (§ 3 PLX-Platform); this role runs
+# before it so that the first `up` already sees the secrets, and creates the
+# dir identically when it is first here.
+- name: "{{ app.name }} | create app dir"
+  ansible.builtin.file:
+    path: "{{ configure_secrets_dir }}"
+    state: directory
+    owner: "{{ plexus_deploy_user }}"
+    group: "{{ plexus_deploy_user }}"
+    mode: "0750"
+
+# Substance stays on the host: per-app secrets from the tenant's `app.secrets`
+# dict — op:// pointers, resolved from the vault here via the 1Password CLI
+# the playbook wrapper already runs under — injected into the container by the
+# app's compose `env_file`. Never world-readable. Three files in the app dir,
+# one writer each (§ 3 PLX-Platform): this role owns .env.secret.
+- name: "{{ app.name }} | write .env.secret (vault-resolved secrets)"
+  ansible.builtin.copy:
+    dest: "{{ configure_secrets_dir }}/.env.secret"
+    content: |
+      # Written by the configure playbook from the tenant inventory, apps[].secrets,
+      # resolved from the vault (PLX-Secrets). Do not edit.
+      {% for key, ref in app.secrets.items() %}
+      {{ key }}={{ lookup('ansible.builtin.pipe', 'op read ' ~ (ref | quote)) }}
+      {% endfor %}
+    owner: "{{ plexus_deploy_user }}"
+    group: "{{ plexus_deploy_user }}"
+    mode: "0600"
+  when: app.secrets is defined
+  no_log: true
+  notify: Re-create app containers for rotated secrets
+
+- name: "{{ app.name }} | remember the app dir for the rotation handler"
+  ansible.builtin.set_fact:
+    configure_secrets_dirs: "{{ (configure_secrets_dirs | default([])) + [configure_secrets_dir] }}"

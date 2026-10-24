@@ -15,12 +15,13 @@
 # app's source repo (an app repo, or this platform repo's own apps/<name>/ for
 # third-party software) and the deploy verb renders it at deploy time with the
 # image pinned, so the compose file on the host always names the image it
-# serves (§ 2 PLX-App). Three files in the app dir, one writer each (PLX-Secrets):
-# this playbook owns .env and .env.secret; the deploy verb owns compose.yaml.
+# serves (§ 2 PLX-App). Three files in the app dir, one writer each (§ 3 PLX-Platform):
+# this role owns .env, configure_secrets owns .env.secret (PLX-Secrets), and
+# the deploy verb owns compose.yaml.
 # Compose reads .env from the project dir implicitly, so every invocation —
 # the verb's, the rotation handler's, a human's — is a bare `docker compose`.
 
-# .env (§ 3 PLX-App, PLX-Ingress), three sections: compose's own setting, the reserved
+# .env (§ 3 PLX-App, § 3 PLX-Platform), three sections: compose's own setting, the reserved
 # PLEXUS_ bindings, then the non-secret values the inventory provides for the
 # app (`app.env`). The project name defaults to the app dir's basename, which
 # collides the moment two co-hosted tenants deploy an app with the same name
@@ -39,33 +40,13 @@
       # Platform bindings (reserved PLEXUS_ prefix, § 4 PLX-App).
       PLEXUS_LOOPBACK_PORT={{ app.loopback_port }}
 
-      # Values from the inventory record, apps[].env (PLX-Ingress).
+      # Values from the inventory record, apps[].env (§ 3 PLX-Platform).
       {% for key, value in (app.env | default({})).items() %}
       {{ key }}={{ value }}
       {% endfor %}
     owner: "{{ plexus_deploy_user }}"
     group: "{{ plexus_deploy_user }}"
     mode: "0640"
-  notify: Re-create app containers
-
-# Substance stays on the host: per-app secrets from the tenant's `app.secrets`
-# dict — op:// pointers, resolved from the vault here via the 1Password CLI
-# the playbook wrapper already runs under — injected into the container by the
-# app's compose `env_file`. Never world-readable.
-- name: "{{ app.name }} | write .env.secret (vault-resolved secrets)"
-  ansible.builtin.copy:
-    dest: "{{ configure_apps_dir }}/.env.secret"
-    content: |
-      # Written by the configure playbook from the tenant inventory, apps[].secrets,
-      # resolved from the vault (PLX-Secrets). Do not edit.
-      {% for key, ref in app.secrets.items() %}
-      {{ key }}={{ lookup('ansible.builtin.pipe', 'op read ' ~ (ref | quote)) }}
-      {% endfor %}
-    owner: "{{ plexus_deploy_user }}"
-    group: "{{ plexus_deploy_user }}"
-    mode: "0600"
-  when: app.secrets is defined
-  no_log: true
   notify: Re-create app containers
 
 - name: "{{ app.name }} | log in to GHCR as the deploy user"

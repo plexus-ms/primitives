@@ -15,6 +15,7 @@
     - configure_mail
     - configure_pbs
     - configure_proxmox
+    - configure_secrets
     - configure_sshd
     - configure_unattended_upgrades
     - install_alloy
