@@ -25,8 +25,13 @@ configure_pbs_verify_outdated_after_days: 30
 
 # Clients that push backups: a user in the pbs realm with one API token each
 # and the DatastoreBackup role on the datastore (add and read own backups,
-# never prune or delete). The token is generated once by hand, because PBS
-# shows its secret a single time.
+# never prune or delete). The role creates the user and grants the role; the
+# token's secret is shown by PBS a single time, so generating it is the one
+# hand step, run on the server after the first play and stored in the vault:
+#   proxmox-backup-manager user generate-token <user>@pbs <token>
+#   → op item edit <tenant>/pbs-<user> password=<the printed value>
+# The hypervisor reads it back as configure_proxmox_pbs_token_secret. A lost
+# secret is replaced the same way (delete-token, generate-token, vault).
 #   configure_pbs_clients:
 #     - user: srv01
 #       token: backup
@@ -73,6 +78,7 @@ configure_pbs_suppress_subscription_notice: true
 #     password: relay-password
 #     from_address: host@example.org
 #     mailto: alerts@example.org
+#     rotate: false             # true for one run after rotating the password
 configure_pbs_alerts_smtp: {}
 
 # The check for backups that silently stopped arriving: once a day, mail the

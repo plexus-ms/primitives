@@ -53,7 +53,11 @@ configure_proxmox_internal_bridge: vmbr1
 # only add backups. Backups are encrypted on this host with the key below (a
 # proxmox-backup-client key file as JSON, kept in the vault), so the server
 # and whatever it syncs to hold ciphertext only. An empty server means no
-# backups.
+# backups. The key is made once, by hand, because it must never exist outside
+# the vault and the hosts that use it:
+#   proxmox-backup-client key create --kdf none /tmp/pbs-key.json
+#   → op item edit <tenant>/pbs-encryption-key notesPlain="$(cat /tmp/pbs-key.json)" && rm /tmp/pbs-key.json
+# Losing it makes every backup unreadable; keep a paper copy (`key paperkey`).
 #   configure_proxmox_pbs_storages:
 #     - id: pbs-acme
 #       namespace: acme

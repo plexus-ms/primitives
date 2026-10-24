@@ -59,7 +59,10 @@
 
 # ── datastore ───────────────────────────────────────────────────────────────
 # proxmox-backup-manager is the configuration's own front end; each resource
-# is read as JSON first and created only when it is missing.
+# is read as JSON first, created when it is missing, and updated when what the
+# server holds differs from what the inventory says — so a changed schedule or
+# retention reaches the server on the next run, never only on a fresh install.
+# A resource created in this run is not in the read, so it is not updated too.
 - name: Read the datastores
   ansible.builtin.command:
     cmd: proxmox-backup-manager datastore list --output-format json
@@ -73,6 +76,18 @@
       proxmox-backup-manager datastore create {{ configure_pbs_datastore }} {{ configure_pbs_datastore_path }}
       --gc-schedule "{{ configure_pbs_gc_schedule }}"
   when: configure_pbs_datastore not in (configure_pbs_datastores.stdout | from_json | map(attribute='name'))
+  changed_when: true
+
+- name: Update the datastore's garbage-collection schedule when it drifted
+  vars:
+    configure_pbs_datastore_current: >-
+      {{ configure_pbs_datastores.stdout | from_json
+      | selectattr('name', 'equalto', configure_pbs_datastore) | list }}
+  ansible.builtin.command:
+    cmd: proxmox-backup-manager datastore update {{ configure_pbs_datastore }} --gc-schedule "{{ configure_pbs_gc_schedule }}"
+  when:
+    - configure_pbs_datastore_current | length > 0
+    - configure_pbs_datastore_current[0]['gc-schedule'] | default('') != configure_pbs_gc_schedule
   changed_when: true
 
 # A namespace is a directory in the datastore. Creating it there needs no API
@@ -105,6 +120,27 @@
   when: configure_pbs_datastore not in (configure_pbs_prune_jobs.stdout | from_json | map(attribute='id'))
   changed_when: true
 
+- name: Update the prune job when it drifted
+  vars:
+    configure_pbs_prune_job: >-
+      {{ configure_pbs_prune_jobs.stdout | from_json
+      | selectattr('id', 'equalto', configure_pbs_datastore) | list }}
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager prune-job update {{ configure_pbs_datastore }}
+      --schedule "{{ configure_pbs_prune_schedule }}"
+      --keep-daily {{ configure_pbs_keep_daily }}
+      --keep-weekly {{ configure_pbs_keep_weekly }}
+      --keep-monthly {{ configure_pbs_keep_monthly }}
+  when:
+    - configure_pbs_prune_job | length > 0
+    - >-
+      configure_pbs_prune_job[0].schedule | default('') != configure_pbs_prune_schedule
+      or configure_pbs_prune_job[0]['keep-daily'] | default(0) | int != configure_pbs_keep_daily | int
+      or configure_pbs_prune_job[0]['keep-weekly'] | default(0) | int != configure_pbs_keep_weekly | int
+      or configure_pbs_prune_job[0]['keep-monthly'] | default(0) | int != configure_pbs_keep_monthly | int
+  changed_when: true
+
 - name: Read the verify jobs
   ansible.builtin.command:
     cmd: proxmox-backup-manager verify-job list --output-format json
@@ -119,6 +155,24 @@
       --store {{ configure_pbs_datastore }} --schedule "{{ configure_pbs_verify_schedule }}"
       --ignore-verified true --outdated-after {{ configure_pbs_verify_outdated_after_days }}
   when: configure_pbs_datastore not in (configure_pbs_verify_jobs.stdout | from_json | map(attribute='id'))
+  changed_when: true
+
+- name: Update the verify job when it drifted
+  vars:
+    configure_pbs_verify_job: >-
+      {{ configure_pbs_verify_jobs.stdout | from_json
+      | selectattr('id', 'equalto', configure_pbs_datastore) | list }}
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager verify-job update {{ configure_pbs_datastore }}
+      --schedule "{{ configure_pbs_verify_schedule }}"
+      --ignore-verified true --outdated-after {{ configure_pbs_verify_outdated_after_days }}
+  when:
+    - configure_pbs_verify_job | length > 0
+    - >-
+      configure_pbs_verify_job[0].schedule | default('') != configure_pbs_verify_schedule
+      or not (configure_pbs_verify_job[0]['ignore-verified'] | default(false) | bool)
+      or configure_pbs_verify_job[0]['outdated-after'] | default(0) | int != configure_pbs_verify_outdated_after_days | int
   changed_when: true
 
 # ── access ──────────────────────────────────────────────────────────────────
@@ -261,6 +315,22 @@
       when: configure_pbs_offsite_datastore not in (configure_pbs_sync_jobs.stdout | from_json | map(attribute='id'))
       changed_when: true
 
+    - name: Update the sync job when it drifted
+      vars:
+        configure_pbs_sync_job: >-
+          {{ configure_pbs_sync_jobs.stdout | from_json
+          | selectattr('id', 'equalto', configure_pbs_offsite_datastore) | list }}
+      ansible.builtin.command:
+        cmd: >-
+          proxmox-backup-manager sync-job update {{ configure_pbs_offsite_datastore }}
+          --remote-store {{ configure_pbs_datastore }} --schedule "{{ configure_pbs_offsite_sync_schedule }}"
+      when:
+        - configure_pbs_sync_job | length > 0
+        - >-
+          configure_pbs_sync_job[0].schedule | default('') != configure_pbs_offsite_sync_schedule
+          or configure_pbs_sync_job[0]['remote-store'] | default('') != configure_pbs_datastore
+      changed_when: true
+
     - name: Create the off-site prune job
       ansible.builtin.command:
         cmd: >-
@@ -270,6 +340,27 @@
           --keep-weekly {{ configure_pbs_keep_weekly }}
           --keep-monthly {{ configure_pbs_keep_monthly }}
       when: configure_pbs_offsite_datastore not in (configure_pbs_prune_jobs.stdout | from_json | map(attribute='id'))
+      changed_when: true
+
+    - name: Update the off-site prune job when it drifted
+      vars:
+        configure_pbs_offsite_prune_job: >-
+          {{ configure_pbs_prune_jobs.stdout | from_json
+          | selectattr('id', 'equalto', configure_pbs_offsite_datastore) | list }}
+      ansible.builtin.command:
+        cmd: >-
+          proxmox-backup-manager prune-job update {{ configure_pbs_offsite_datastore }}
+          --schedule "{{ configure_pbs_offsite_prune_schedule }}"
+          --keep-daily {{ configure_pbs_keep_daily }}
+          --keep-weekly {{ configure_pbs_keep_weekly }}
+          --keep-monthly {{ configure_pbs_keep_monthly }}
+      when:
+        - configure_pbs_offsite_prune_job | length > 0
+        - >-
+          configure_pbs_offsite_prune_job[0].schedule | default('') != configure_pbs_offsite_prune_schedule
+          or configure_pbs_offsite_prune_job[0]['keep-daily'] | default(0) | int != configure_pbs_keep_daily | int
+          or configure_pbs_offsite_prune_job[0]['keep-weekly'] | default(0) | int != configure_pbs_keep_weekly | int
+          or configure_pbs_offsite_prune_job[0]['keep-monthly'] | default(0) | int != configure_pbs_keep_monthly | int
       changed_when: true
 
 # ── subscription notice ─────────────────────────────────────────────────────
@@ -317,6 +408,49 @@
       changed_when: true
       no_log: true
 
+    # The password is not readable back, so it rides along whenever a visible
+    # field drifted; a rotation of the password alone is applied with
+    # `rotate: true` on the dict, for one run.
+    - name: Update the SMTP endpoint when it drifted
+      vars:
+        configure_pbs_smtp_current: >-
+          {{ configure_pbs_smtp_endpoints.stdout | from_json
+          | selectattr('name', 'equalto', 'smtp') | list }}
+      ansible.builtin.command:
+        argv:
+          - proxmox-backup-manager
+          - notification
+          - endpoint
+          - smtp
+          - update
+          - smtp
+          - --server
+          - "{{ configure_pbs_alerts_smtp.server }}"
+          - --port
+          - "{{ configure_pbs_alerts_smtp.port }}"
+          - --mode
+          - "{{ configure_pbs_alerts_smtp.mode }}"
+          - --username
+          - "{{ configure_pbs_alerts_smtp.username }}"
+          - --password
+          - "{{ configure_pbs_alerts_smtp.password }}"
+          - --from-address
+          - "{{ configure_pbs_alerts_smtp.from_address }}"
+          - --mailto
+          - "{{ configure_pbs_alerts_smtp.mailto }}"
+      when:
+        - configure_pbs_smtp_current | length > 0
+        - >-
+          configure_pbs_alerts_smtp.rotate | default(false) | bool
+          or configure_pbs_smtp_current[0].server | default('') != configure_pbs_alerts_smtp.server
+          or configure_pbs_smtp_current[0].port | default(0) | int != configure_pbs_alerts_smtp.port | int
+          or configure_pbs_smtp_current[0].mode | default('insecure') != configure_pbs_alerts_smtp.mode
+          or configure_pbs_smtp_current[0].username | default('') != configure_pbs_alerts_smtp.username
+          or configure_pbs_smtp_current[0]['from-address'] | default('') != configure_pbs_alerts_smtp.from_address
+          or configure_pbs_smtp_current[0].mailto | default([]) | join(',') != configure_pbs_alerts_smtp.mailto
+      changed_when: true
+      no_log: true
+
     - name: Read the matchers
       ansible.builtin.command:
         cmd: proxmox-backup-manager notification matcher list --output-format json
@@ -331,6 +465,24 @@
           --match-severity warning,error,unknown
           --comment "Warnings and failures to the alerts mailbox"
       when: "'alerts' not in (configure_pbs_matchers.stdout | from_json | map(attribute='name'))"
+      changed_when: true
+
+    - name: Update the matcher when it drifted
+      vars:
+        configure_pbs_matcher: >-
+          {{ configure_pbs_matchers.stdout | from_json
+          | selectattr('name', 'equalto', 'alerts') | list }}
+      ansible.builtin.command:
+        cmd: >-
+          proxmox-backup-manager notification matcher update alerts --target smtp
+          --match-severity warning,error,unknown
+          --comment "Warnings and failures to the alerts mailbox"
+      when:
+        - configure_pbs_matcher | length > 0
+        - >-
+          configure_pbs_matcher[0].target | default([]) | join(',') != 'smtp'
+          or configure_pbs_matcher[0]['match-severity'] | default([]) | join(',') != 'warning,error,unknown'
+          or configure_pbs_matcher[0].disable | default(false) | bool
       changed_when: true
 
     - name: Disable the built-in matcher

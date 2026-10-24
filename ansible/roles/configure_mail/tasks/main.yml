@@ -70,8 +70,8 @@
       when: configure_mail_failed_units
       block:
         - name: Install the failure-mail script
-          ansible.builtin.copy:
-            src: failure-mail
+          ansible.builtin.template:
+            src: failure-mail.j2
             dest: /usr/local/sbin/failure-mail
             owner: root
             group: root

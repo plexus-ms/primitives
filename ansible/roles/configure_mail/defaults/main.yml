@@ -18,5 +18,8 @@ configure_mail_smtp: {}
 # Have unattended-upgrades mail when an upgrade fails (never on success).
 configure_mail_unattended_upgrades: true
 
-# Mail when any systemd service fails: its status and last log lines.
+# Mail when any systemd service fails: its status and last log lines, at most
+# once per unit per interval (seconds), so a job that fails on every tick of
+# its timer is reported once a day rather than every tick.
 configure_mail_failed_units: true
+configure_mail_failure_interval: 86400

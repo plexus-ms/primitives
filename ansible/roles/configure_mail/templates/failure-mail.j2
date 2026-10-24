@@ -1,0 +1,20 @@
+#!/bin/sh
+# Mail root that a systemd unit failed, with its status and last log lines —
+# at most once per {{ configure_mail_failure_interval }} s per unit, so a unit
+# that fails on every tick of its timer is reported once, not every tick.
+# Started by failure-mail@<unit>.service, the OnFailure of every service.
+# Managed by Ansible (configure_mail); do not edit.
+set -eu
+unit="$1"
+stamps=/var/lib/failure-mail
+stamp="$stamps/$unit"
+mkdir -p "$stamps"
+if [ -f "$stamp" ] && [ "$(( $(date +%s) - $(stat -c %Y "$stamp") ))" -lt {{ configure_mail_failure_interval }} ]; then
+    exit 0
+fi
+touch "$stamp"
+{
+    systemctl status --full --no-pager "$unit" || true
+    echo
+    journalctl --no-pager -n 50 -u "$unit" || true
+} | mail -s "[$(hostname)] $unit failed" root
