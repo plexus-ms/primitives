@@ -10,7 +10,7 @@ configure_haproxy_internal_interface: eth1
 configure_haproxy_internal_network: 10.10.0.0/24
 
 # Tenant VMs behind the ingress: the host names that reach each one, and
-# optionally a public port forwarded to the VM's SSH (PLX-Deploy deploys).
+# optionally a public port forwarded to the VM's SSH (the deploy verb, § 6 PLX-Delivery).
 #   - name: vm101
 #     address: 10.10.0.11
 #     hosts: [example.org, www.example.org]

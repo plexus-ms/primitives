@@ -61,7 +61,7 @@
 
 # Nothing to bring up until the deploy verb has placed the run shape: a fresh
 # host stays provisioned-but-empty until the first CI deploy (or a hand-run of
-# the verb), which is the operator's supervised act (PLX-Deploy).
+# the verb), which is the operator's supervised act (§ 6 PLX-Delivery).
 - name: "{{ app.name }} | check whether the deploy verb has placed compose.yaml"
   ansible.builtin.stat:
     path: "{{ configure_apps_dir }}/compose.yaml"
