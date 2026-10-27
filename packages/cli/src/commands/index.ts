@@ -1,0 +1,12 @@
+// Every command of plx, in the order `plx --help` lists them.
+//
+// A command module exports `register(program: Command): void` and declares its
+// arguments and options with commander: explicit targets, never an implicit
+// "current" one, and never a secret (env vars for those). Its action maps them
+// onto a verb of @plexus-ms/lib through `contextOf(command)` (program.ts) and
+// nothing more: the logic, the planning and the tests live in lib. --dry-run,
+// --json, verbosity and --yes then apply without code of the command's own.
+// Keep the module's header comment the hand-run form of the verb.
+import type { Command } from 'commander';
+
+export const commands: ((program: Command) => void)[] = [];

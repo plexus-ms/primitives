@@ -1,0 +1,39 @@
+{
+  "name": "@plexus-ms/lib",
+  "version": "0.0.0",
+  "description": "The Plexus verbs as a library: plan-then-apply core behind plx, with no dependencies",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plexus-ms/packages.git",
+    "directory": "packages/lib"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "node --test",
+    "prepack": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "catalog:"
+  }
+}
