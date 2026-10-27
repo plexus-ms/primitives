@@ -2,7 +2,7 @@
 // Context (context.ts). The real one wraps node; a test hands in a fake and
 // asserts what was asked of it, with no subprocess and no filesystem.
 import { spawn } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import type { Writable } from 'node:stream';
 
 export interface ExecOptions {
@@ -26,6 +26,13 @@ export interface Io {
   exec(command: string, args: string[], options?: ExecOptions): Promise<string>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  /** The entries of a directory, in no particular order. */
+  readDir(path: string): Promise<DirEntry[]>;
+}
+
+export interface DirEntry {
+  name: string;
+  directory: boolean;
 }
 
 export class ExecError extends Error {
@@ -74,6 +81,8 @@ export function realIo(prompt?: Io['prompt']): Io {
       }),
     readFile: (path) => readFile(path, 'utf8'),
     writeFile: (path, content) => writeFile(path, content),
+    readDir: async (path) =>
+      (await readdir(path, { withFileTypes: true })).map((e) => ({ name: e.name, directory: e.isDirectory() })),
   };
 }
 

@@ -33,6 +33,7 @@ function make(overrides: Options = {}, prompt?: Io['prompt']) {
     writeFile: async (path) => {
       calls.push(`writeFile ${path}`);
     },
+    readDir: async () => [],
   };
   return { ctx: new Context(overrides, io), calls, out: () => out, err: () => err };
 }

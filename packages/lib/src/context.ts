@@ -11,7 +11,7 @@
 // the verb knows the whole of what it is about to do. Narration goes to
 // stderr, results to stdout, so `plx <verb> | ...` composes like the script
 // it replaces. Conventions: compendium/miscellaneous/cli-design.md.
-import { type ExecOptions, type Io, realIo } from './io.ts';
+import { type DirEntry, type ExecOptions, type Io, realIo } from './io.ts';
 import { body, describe, type Plan, type Step } from './plan.ts';
 
 export interface Options {
@@ -74,6 +74,11 @@ export class Context {
   readFile(path: string): Promise<string> {
     this.say(`? read ${path}`, 1);
     return this.io.readFile(path);
+  }
+
+  readDir(path: string): Promise<DirEntry[]> {
+    this.say(`? list ${path}`, 2);
+    return this.io.readDir(path);
   }
 
   // --- effects: narrated always, performed unless --dry-run -----------------
