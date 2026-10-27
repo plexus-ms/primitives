@@ -1,0 +1,16 @@
+{
+  "extends": "@plexus-ms/config/tsconfig-cli",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "incremental": false,
+    // Source imports name `.ts` files so that node runs src/ directly (tests,
+    // type stripping) and tsc rewrites them to `.js` in dist.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    // node runs src/ with type stripping only, so tsc refuses what stripping cannot.
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts"]
+}
