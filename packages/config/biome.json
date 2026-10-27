@@ -29,7 +29,7 @@
   },
   "overrides": [
     {
-      "includes": ["**/*.yaml", "**/*.yml"],
+      "includes": ["**/*.yaml", "**/*.yml", "**/*.md"],
       "formatter": {
         "enabled": false
       }
