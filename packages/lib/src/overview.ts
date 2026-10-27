@@ -38,20 +38,24 @@ export const PRUNED = new Set([
   '.gradle',
 ]);
 
-export async function overview(ctx: Context, root: string): Promise<Directory> {
-  const dir = await walk(ctx, root, root.replace(/\/+$/, '').split('/').pop() || root);
-  return dir;
+export interface ScanOptions {
+  /** Read the git facets (four git calls per repo); off for verbs that only need markers. */
+  git?: boolean;
 }
 
-async function walk(ctx: Context, path: string, name: string): Promise<Directory> {
+export function overview(ctx: Context, root: string, options: ScanOptions = {}): Promise<Directory> {
+  return walk(ctx, root, root.replace(/\/+$/, '').split('/').pop() || root, { git: true, ...options });
+}
+
+async function walk(ctx: Context, path: string, name: string, options: Required<ScanOptions>): Promise<Directory> {
   const entries = await ctx.readDir(path);
   const files = new Set(entries.filter((e) => !e.directory).map((e) => e.name));
   const names = new Set(entries.map((e) => e.name));
   const dir: Directory = { name, path, children: [] };
 
   // `.git` is a directory for a checkout and a file for a worktree or submodule.
-  if (names.has('.git')) dir.git = await gitFacet(ctx, path);
-  if (TEMPLATE_FILES.some((f) => files.has(f))) dir.template = await templateFacet(ctx, path);
+  if (names.has('.git') && options.git) dir.git = await gitFacet(ctx, path);
+  if (TEMPLATE_FILES.some((f) => files.has(f))) dir.template = options.git ? await templateFacet(ctx, path) : {};
   if (files.has(ANSWERS_FILE)) {
     await facet(ctx, dir, ANSWERS_FILE, (text) => {
       dir.copier = parseAnswers(text);
@@ -68,7 +72,7 @@ async function walk(ctx: Context, path: string, name: string): Promise<Directory
     .map((e) => e.name)
     .sort();
   for (const sub of subdirs) {
-    const child = await walk(ctx, join(path, sub), sub);
+    const child = await walk(ctx, join(path, sub), sub, options);
     if (isNotable(child) || child.children.length > 0) dir.children.push(child);
   }
   return dir;
