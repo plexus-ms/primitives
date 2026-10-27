@@ -6,8 +6,10 @@
 // package is an adapter that maps argv onto this. The parsers of Plexus's own
 // file shapes (marker.ts, copier.ts) live here, once, for every verb.
 // Conventions: compendium/miscellaneous/cli-design.md.
+export { CATALOG_DIRS, type Catalog, type Module, parseModule, readCatalog } from './catalog.ts';
 export { Context, type Options } from './context.ts';
 export { ANSWERS_FILE, type Answers, parseAnswers, TEMPLATE_FILES } from './copier.ts';
+export { compareTrains, type Diagnosis, diagnose, type Report } from './doctor.ts';
 export { type DirEntry, ExecError, type ExecOptions, type Io, realIo, render } from './io.ts';
 export { type Declaration, MARKER_FILE, parseMarker, splitFrontmatter } from './marker.ts';
 export {
@@ -19,5 +21,5 @@ export {
   shortRemote,
   type TemplateFacet,
 } from './model.ts';
-export { overview, PRUNED } from './overview.ts';
+export { overview, PRUNED, type ScanOptions } from './overview.ts';
 export { body, describe, type Plan, run, type Step, ssh, write } from './plan.ts';
