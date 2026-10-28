@@ -1,6 +1,6 @@
 {
   "name": "@plexus-ms/lib",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The Plexus verbs as a library: the plan-then-apply core behind plx, and the one parser of Plexus's own file shapes",
   "license": "GPL-3.0-or-later",
   "type": "module",
