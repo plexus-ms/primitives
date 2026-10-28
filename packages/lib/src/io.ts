@@ -10,7 +10,11 @@ export interface ExecOptions {
   env?: NodeJS.ProcessEnv;
   /** Fed to the process's stdin, then closed. */
   input?: string;
-  /** Pass the process's output through to the terminal instead of capturing it. */
+  /**
+   * Pass the process's output through to the terminal instead of capturing it,
+   * and, when nothing is fed in, its input too: a program that asks questions
+   * (copier) gets to ask them.
+   */
   inherit?: boolean;
 }
 
@@ -61,7 +65,11 @@ export function realIo(prompt?: Io['prompt']): Io {
         const child = spawn(command, args, {
           cwd: options.cwd,
           env: options.env,
-          stdio: [options.input === undefined ? 'ignore' : 'pipe', options.inherit ? 'inherit' : 'pipe', 'pipe'],
+          stdio: [
+            options.input !== undefined ? 'pipe' : options.inherit ? 'inherit' : 'ignore',
+            options.inherit ? 'inherit' : 'pipe',
+            'pipe',
+          ],
         });
         let stdout = '';
         let stderr = '';

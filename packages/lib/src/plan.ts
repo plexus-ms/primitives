@@ -8,13 +8,17 @@
 import { render } from './io.ts';
 
 export type Step =
-  | { kind: 'run'; command: string; args: string[]; cwd?: string; input?: string }
+  | { kind: 'run'; command: string; args: string[]; cwd?: string; input?: string; interactive?: boolean }
   | { kind: 'ssh'; host: string; script: string }
   | { kind: 'write'; path: string; content: string };
 
 export type Plan = Step[];
 
-export const run = (command: string, args: string[] = [], options: { cwd?: string; input?: string } = {}): Step => ({
+export const run = (
+  command: string,
+  args: string[] = [],
+  options: { cwd?: string; input?: string; interactive?: boolean } = {},
+): Step => ({
   kind: 'run',
   command,
   args,
