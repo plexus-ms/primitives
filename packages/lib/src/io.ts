@@ -13,7 +13,8 @@ export interface ExecOptions {
   /**
    * Pass the process's output through to the terminal instead of capturing it,
    * and, when nothing is fed in, its input too: a program that asks questions
-   * (copier) gets to ask them.
+   * (copier) gets to ask them. Both of its streams go to stderr: stdout is the
+   * verb's result and stays clean for `--json` and pipes.
    */
   inherit?: boolean;
 }
@@ -67,7 +68,7 @@ export function realIo(prompt?: Io['prompt']): Io {
           env: options.env,
           stdio: [
             options.input !== undefined ? 'pipe' : options.inherit ? 'inherit' : 'ignore',
-            options.inherit ? 'inherit' : 'pipe',
+            options.inherit ? process.stderr.fd : 'pipe',
             'pipe',
           ],
         });
