@@ -3,7 +3,9 @@
 // release, so `ship` and `propagate` refuse to run behind the registry. Asked
 // with `npm view`, the same question answered by hand; an unreachable registry
 // only warns, because a release that cannot reach npm fails on its own soon
-// enough, and a propagation offline is legitimate.
+// enough, and a propagation offline is legitimate. The update the refusal
+// names clears mise's cached version list of the tool first: without that,
+// `mise up` keeps answering from the list it fetched before the release.
 //
 //   npm view @plexus-ms/cli version   # what plx compares itself with
 import type { Context } from './context.ts';
@@ -20,6 +22,6 @@ export async function preflightSelf(ctx: Context, running: string): Promise<void
   }
   if (compareTrains(running, latest) < 0)
     throw new Error(
-      `plx ${running} is behind ${latest}, the newest release; update it first: mise up npm:${SELF_PACKAGE}`,
+      `plx ${running} is behind ${latest}, the newest release; update it first: mise cache clear npm:${SELF_PACKAGE} && mise up npm:${SELF_PACKAGE}`,
     );
 }
