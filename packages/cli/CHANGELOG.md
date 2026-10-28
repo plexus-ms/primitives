@@ -1,5 +1,18 @@
 # @plexus-ms/cli
 
+## 0.8.0
+
+### Minor Changes
+
+- 9b5f892: `plx changeset` also owes a patch to a published package whose shipped source the bot's branch changed (its `src/`, tests excluded), for a pin the update bot moves outside a manifest through a regex manager. The copier version plx pins is the first: annotated `// renovate: datasource=pypi depName=copier`, it is bumped by Renovate and now released like any dependency bump.
+
+### Patch Changes
+
+- cb0532f: The refusal of a `plx` behind its newest release names the update as `mise up npm:@plexus-ms/cli` alone: what held a fresh release back was mise's minimum release age, not its cache, so the `mise cache clear` it suggested first was never needed.
+- Updated dependencies [9b5f892]
+- Updated dependencies [cb0532f]
+  - @plexus-ms/lib@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes
