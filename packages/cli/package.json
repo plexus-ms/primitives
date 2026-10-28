@@ -29,7 +29,7 @@
     "prepack": "pnpm build"
   },
   "devDependencies": {
-    "@inquirer/prompts": "^8.0.0",
+    "@inquirer/prompts": "^8.7.4",
     "@plexus-ms/lib": "workspace:*",
     "@types/node": "^26.6.5",
     "commander": "^15.0.0",
