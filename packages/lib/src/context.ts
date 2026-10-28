@@ -4,6 +4,9 @@
 //   read   look at the world; always performed, so a dry run sees real state
 //   apply  perform a Plan (plan.ts); every step is narrated with its exact
 //          shell line, and performed unless --dry-run
+//   stage  perform a step on scratch state the run owns (a preview clone, a
+//          temporary directory): narrated as a read, performed even under
+//          --dry-run, because nothing the operator owns changes
 //   result print the command's product: human-readable, or JSON under --json
 //
 // Plan, then confirm, then apply: validation and every read happen while
@@ -106,15 +109,28 @@ export class Context {
     }
   }
 
-  private perform(step: Step): Promise<unknown> {
-    const inherit = this.verbose >= 2;
+  /**
+   * Perform a step on scratch state, whatever the mode: the one exception to
+   * "a dry run performs no effect", for a preview that has to run a tool
+   * against a throwaway copy to be honest. Resolves with the output of a run.
+   */
+  stage(step: Step): Promise<string | undefined> {
+    this.say(`? ${describe(step)}`, 1);
+    const input = body(step);
+    if (input !== undefined) this.say(indent(input), 2);
+    return this.perform(step);
+  }
+
+  private async perform(step: Step): Promise<string | undefined> {
+    const inherit = this.verbose >= 2 || (step.kind === 'run' && step.interactive === true);
     switch (step.kind) {
       case 'run':
         return this.io.exec(step.command, step.args, { cwd: step.cwd, input: step.input, inherit });
       case 'ssh':
         return this.io.exec('ssh', [step.host, 'bash', '-s'], { input: step.script, inherit });
       case 'write':
-        return this.io.writeFile(step.path, step.content);
+        await this.io.writeFile(step.path, step.content);
+        return undefined;
     }
   }
 }
