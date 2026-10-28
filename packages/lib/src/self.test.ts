@@ -19,7 +19,7 @@ function registry(latest: string | undefined) {
 test('preflightSelf refuses a plx behind the newest release, naming the update', async () => {
   await assert.rejects(
     preflightSelf(registry('0.7.0\n').ctx, '0.6.0'),
-    /plx 0\.6\.0 is behind 0\.7\.0, the newest release; update it first: mise up npm:@plexus-ms\/cli$/,
+    /plx 0\.6\.0 is behind 0\.7\.0, the newest release; update it first: mise cache clear npm:@plexus-ms\/cli && mise up npm:@plexus-ms\/cli$/,
   );
 });
 
