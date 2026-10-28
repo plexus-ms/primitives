@@ -6,7 +6,10 @@ import type { Io } from '../io.ts';
 
 export type Tree = { [name: string]: string | Tree };
 
-export function fakeIo(tree: Tree, git: (cwd: string, args: string[]) => string | undefined = () => undefined): Io {
+export type FakeExec = (cwd: string, args: string[]) => string | undefined;
+
+/** `git` answers git calls; `other` answers any other command, by name. */
+export function fakeIo(tree: Tree, git: FakeExec = () => undefined, other: Record<string, FakeExec> = {}): Io {
   const at = (path: string): Tree | string | undefined =>
     path
       .split('/')
@@ -16,9 +19,10 @@ export function fakeIo(tree: Tree, git: (cwd: string, args: string[]) => string 
     stdout: new PassThrough(),
     stderr: new PassThrough(),
     exec: async (command, args, options) => {
-      assert.equal(command, 'git');
-      const out = git(options?.cwd ?? '', args);
-      if (out === undefined) throw new Error(`fake git: ${args.join(' ')} fails in ${options?.cwd}`);
+      const handler = command === 'git' ? git : other[command];
+      assert.ok(handler, `fake io: no handler for ${command}`);
+      const out = handler(options?.cwd ?? '', args);
+      if (out === undefined) throw new Error(`fake ${command}: ${args.join(' ')} fails in ${options?.cwd}`);
       return out;
     },
     readFile: async (path) => {

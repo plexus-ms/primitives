@@ -19,6 +19,13 @@ export {
 } from './bookkeeping.ts';
 export { CATALOG_DIRS, type Catalog, type Module, parseModule, readCatalog } from './catalog.ts';
 export {
+  type ChangedApps,
+  type ChangedAppsInput,
+  type Reason,
+  readChangedApps,
+  selectChangedApps,
+} from './changedApps.ts';
+export {
   CHANGESET_DIR,
   type Changeset,
   type ChangesetInput,
@@ -33,6 +40,13 @@ export {
 export { type Consumer, expectedBranch, findConsumers, presetSource, type Site } from './consumers.ts';
 export { Context, type Options } from './context.ts';
 export { ANSWERS_FILE, type Answers, parseAnswers, TEMPLATE_FILES } from './copier.ts';
+export {
+  type DeployTargets,
+  type InventoryFile,
+  parseInventoryFile,
+  readDeployTargets,
+  selectDeployTargets,
+} from './deployTargets.ts';
 export { compareTrains, type Diagnosis, diagnose, type Report } from './doctor.ts';
 export { frontmatterField, setFrontmatterField } from './frontmatter.ts';
 export { type DirEntry, ExecError, type ExecOptions, type Io, realIo, render } from './io.ts';
