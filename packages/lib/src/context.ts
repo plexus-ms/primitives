@@ -127,8 +127,6 @@ export class Context {
     switch (step.kind) {
       case 'run':
         return this.io.exec(step.command, step.args, { cwd: step.cwd, input: step.input, inherit });
-      case 'ssh':
-        return this.io.exec('ssh', [step.host, 'bash', '-s'], { input: step.script, inherit });
       case 'write':
         await this.io.writeFile(step.path, step.content);
         return undefined;

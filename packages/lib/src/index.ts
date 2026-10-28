@@ -40,6 +40,7 @@ export {
 export { type Consumer, expectedBranch, findConsumers, presetSource, type Site } from './consumers.ts';
 export { Context, type Options } from './context.ts';
 export { ANSWERS_FILE, type Answers, parseAnswers, TEMPLATE_FILES } from './copier.ts';
+export { type Deploy, type DeployOptions, deploy, q as shellQuote, renderCompose } from './deploy.ts';
 export {
   type DeployTargets,
   type InventoryFile,
@@ -61,7 +62,7 @@ export {
   type TemplateFacet,
 } from './model.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';
-export { body, describe, type Plan, run, type Step, ssh, write } from './plan.ts';
+export { body, describe, type Plan, run, type Step, write } from './plan.ts';
 export { isClean, propagate, type Summary } from './propagate.ts';
 export {
   type CompendiumCheck,

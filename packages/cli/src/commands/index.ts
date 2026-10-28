@@ -10,6 +10,7 @@
 import type { Command } from 'commander';
 import { register as changedApps } from './changed-apps.ts';
 import { register as changeset } from './changeset.ts';
+import { register as deploy } from './deploy.ts';
 import { register as deployTargets } from './deploy-targets.ts';
 import { register as doctor } from './doctor.ts';
 import { register as overview } from './overview.ts';
@@ -26,4 +27,5 @@ export const commands: ((program: Command) => void)[] = [
   changeset,
   changedApps,
   deployTargets,
+  deploy,
 ];

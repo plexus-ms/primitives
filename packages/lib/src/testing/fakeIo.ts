@@ -2,11 +2,11 @@
 // nested trees; `git` answers exec calls. Not shipped (excluded in tsconfig).
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
-import type { Io } from '../io.ts';
+import { ExecError, type Io } from '../io.ts';
 
 export type Tree = { [name: string]: string | Tree };
 
-export type FakeExec = (cwd: string, args: string[]) => string | undefined;
+export type FakeExec = (cwd: string, args: string[], input?: string) => string | undefined;
 
 /** `git` answers git calls; `other` answers any other command, by name. */
 export function fakeIo(tree: Tree, git: FakeExec = () => undefined, other: Record<string, FakeExec> = {}): Io {
@@ -21,8 +21,9 @@ export function fakeIo(tree: Tree, git: FakeExec = () => undefined, other: Recor
     exec: async (command, args, options) => {
       const handler = command === 'git' ? git : other[command];
       assert.ok(handler, `fake io: no handler for ${command}`);
-      const out = handler(options?.cwd ?? '', args);
-      if (out === undefined) throw new Error(`fake ${command}: ${args.join(' ')} fails in ${options?.cwd}`);
+      const out = handler(options?.cwd ?? '', args, options?.input);
+      if (out === undefined)
+        throw new ExecError(`${command} ${args.join(' ')}`, 1, `fake ${command} fails in ${options?.cwd}`);
       return out;
     },
     readFile: async (path) => {

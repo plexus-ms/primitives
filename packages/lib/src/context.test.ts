@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import { Context, type Options } from './context.ts';
 import { type ExecOptions, type Io, realIo } from './io.ts';
-import { run, ssh, write } from './plan.ts';
+import { run, write } from './plan.ts';
 
 /** A fake Io that records what it was asked and performs nothing. */
 function make(overrides: Options = {}, prompt?: Io['prompt']) {
@@ -38,19 +38,23 @@ function make(overrides: Options = {}, prompt?: Io['prompt']) {
   return { ctx: new Context(overrides, io), calls, out: () => out, err: () => err };
 }
 
-const plan = [run('docker', ['compose', 'pull']), ssh('deploy@host', 'echo hi\n'), write('/tmp/x', 'abc')];
+const plan = [
+  run('docker', ['compose', 'pull']),
+  run('ssh', ['deploy@host', '--', 'echo hi'], { input: 'hi\n' }),
+  write('/tmp/x', 'abc'),
+];
 
 test('a dry run narrates the plan exactly as a real run and performs nothing', async () => {
   const real = make();
   const dry = make({ dryRun: true });
   await real.ctx.apply(plan);
   await dry.ctx.apply(plan);
-  const lines = ['$ docker compose pull', "$ ssh deploy@host bash -s <<'EOF'", '> /tmp/x (3 bytes)'];
+  const lines = ['$ docker compose pull', "$ ssh deploy@host -- 'echo hi'", '> /tmp/x (3 bytes)'];
   assert.equal(real.err(), `${lines.join('\n')}\n`);
   assert.equal(dry.err(), `${lines.map((l) => `[dry-run] ${l}`).join('\n')}\n`);
   assert.deepEqual(real.calls, [
     'exec docker compose pull',
-    'exec ssh deploy@host bash -s < echo hi\n',
+    'exec ssh deploy@host -- echo hi < hi\n',
     'writeFile /tmp/x',
   ]);
   assert.deepEqual(dry.calls, []);
@@ -58,8 +62,8 @@ test('a dry run narrates the plan exactly as a real run and performs nothing', a
 
 test('verbose shows what a step feeds in', async () => {
   const { ctx, err } = make({ dryRun: true, verbose: 1 });
-  await ctx.apply([ssh('deploy@host', 'echo hi\n')]);
-  assert.equal(err(), "[dry-run] $ ssh deploy@host bash -s <<'EOF'\n    echo hi\n    EOF\n");
+  await ctx.apply([run('ssh', ['deploy@host', '--', 'cat > x'], { input: 'hi\n' })]);
+  assert.equal(err(), "[dry-run] $ ssh deploy@host -- 'cat > x'\n    hi\n");
 });
 
 test('a read is performed in a dry run and narrated only when verbose', async () => {
