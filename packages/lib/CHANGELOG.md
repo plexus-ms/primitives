@@ -1,5 +1,11 @@
 # @plexus-ms/lib
 
+## 0.3.1
+
+### Patch Changes
+
+- b675a94: An interactive step's output (copier's, during `ship` and `propagate`) goes to stderr like every other narration; stdout stays the verb's result, so `--json` and pipes are not corrupted.
+
 ## 0.3.0
 
 ### Minor Changes
