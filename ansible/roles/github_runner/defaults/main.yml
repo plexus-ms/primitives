@@ -1,0 +1,47 @@
+---
+# GitHub Actions runners of the tenant's own, on a host of their own: N
+# instances of the official runner, registered at the tenant's forge
+# organisation, each a systemd service, jobs running directly on the host
+# with Docker for image builds (§ 8 PLX-Delivery).
+#
+# A runner holds job secrets in flight, so one host serves one tenant
+# (§ 1 PLX-Tenancy) and only the tenant's private repos use it. GitHub-hosted
+# runners stay the default and the fallback: a consumer repo's CI_RUNNER
+# variable selects `self-hosted`, and unsetting it moves CI back to GitHub
+# without a playbook run.
+#
+# The host needs Docker before this role (install_docker; the docker group is
+# root-equivalent, which is why the host runs nothing else). The role opens
+# no port: the runner polls the forge. Mount it in the playbook of the
+# cadence the host is on, after install_docker and before configure_firewall.
+
+# The forge organisation the instances register at. Required.
+github_runner_org: ""
+github_runner_count: 2
+
+# Pinned for the first install only; a registered runner updates itself
+# (GitHub stops scheduling onto runners more than 30 days behind). Checksum
+# from the release notes at https://github.com/actions/runner/releases.
+github_runner_version: 2.338.2
+github_runner_checksum: sha256:baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
+
+github_runner_user: runner
+# One directory per instance under here, each with a home of its own
+# (<root>/<n>/home): tool caches are per instance, never shared between jobs.
+github_runner_root: /opt/actions-runner
+# Extra labels on top of the ones every runner carries (self-hosted, linux, x64).
+github_runner_labels: []
+
+# Fine-grained token with the organisation permission "Self-hosted runners:
+# read and write", used for one thing: minting the one-hour registration
+# token for an instance that is not registered yet. Resolved from the
+# tenant's vault through secrets.env; never written to the host.
+github_runner_pat: "{{ lookup('env', 'GITHUB_RUNNER_PAT') | default('', true) }}"
+
+# Housekeeping, nightly: working directories of repos untouched this many
+# days (on idle instances only), Docker images and build cache unused that
+# long, ssh-agents deploy jobs left behind. Fails, and so mails through
+# configure_mail, when the root file system is fuller than this afterwards.
+github_runner_housekeeping_time: "05:00"
+github_runner_prune_days: 7
+github_runner_disk_alert_percent: 85

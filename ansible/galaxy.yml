@@ -12,8 +12,9 @@ description: >-
   configure_sshd, configure_iam, configure_unattended_upgrades,
   configure_firewall, configure_mail, install_and_join_netbird. A tenant's app
   hosts: configure_deploy_user, install_docker, install_caddy,
-  configure_ingress, configure_secrets, configure_apps, install_alloy. The infrastructure layer:
-  configure_proxmox, configure_pbs, configure_haproxy.
+  configure_ingress, configure_secrets, configure_apps, install_alloy. A tenant's CI
+  runners: github_runner. The infrastructure layer: configure_proxmox,
+  configure_pbs, configure_haproxy.
 license:
   - GPL-3.0-or-later
 repository: https://github.com/plexus-ms/platform

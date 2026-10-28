@@ -1,0 +1,39 @@
+#!/bin/sh
+# Nightly housekeeping for the GitHub Actions runners on this host. Managed by
+# Ansible (github_runner); ROOT, RUNNER_USER, PRUNE_DAYS and DISK_ALERT_PERCENT
+# come from the unit's environment. Hand-runnable:
+#   ROOT=/opt/actions-runner RUNNER_USER=runner PRUNE_DAYS=7 DISK_ALERT_PERCENT=85 github-runner-housekeeping
+set -eu
+: "${ROOT:?}" "${RUNNER_USER:?}" "${PRUNE_DAYS:?}" "${DISK_ALERT_PERCENT:?}"
+
+# Repo working directories (_work/<repo>/<repo>) untouched for PRUNE_DAYS
+# days, on instances that are idle right now: a busy instance has a
+# Runner.Worker process under its directory. The runner's own directories
+# (_work/_temp, _tool, _actions, …) are left to the runner.
+for inst in "$ROOT"/*/; do
+  inst=${inst%/}
+  [ -d "$inst/_work" ] || continue
+  if pgrep -f "^$inst/bin/Runner.Worker" >/dev/null; then
+    echo "$inst: job running, working directories kept"
+    continue
+  fi
+  find "$inst/_work" -mindepth 2 -maxdepth 2 -type d -not -path "$inst/_work/_*" \
+    -mtime +"$PRUNE_DAYS" -print -exec rm -rf {} +
+done
+
+# Images, stopped containers, networks and build cache unused for PRUNE_DAYS
+# days. Base images come back with the next build; the layer cache CI relies
+# on is GitHub's (cache-from: type=gha), not this host's.
+docker system prune --all --force --filter "until=$((PRUNE_DAYS * 24))h"
+docker builder prune --all --force --filter "until=$((PRUNE_DAYS * 24))h"
+
+# The deploy wrapper starts an ssh-agent holding the deploy key and never
+# stops it; on a persistent runner they would accumulate, key and all.
+killall --older-than 1h --user "$RUNNER_USER" ssh-agent 2>/dev/null || true
+
+used=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+echo "root file system ${used}% used"
+if [ "$used" -gt "$DISK_ALERT_PERCENT" ]; then
+  echo "above ${DISK_ALERT_PERCENT}%: look at $ROOT/*/_work, $ROOT/*/home/.local and the Docker data root" >&2
+  exit 1
+fi

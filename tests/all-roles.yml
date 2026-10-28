@@ -18,6 +18,7 @@
     - configure_secrets
     - configure_sshd
     - configure_unattended_upgrades
+    - github_runner
     - install_alloy
     - install_and_join_netbird
     - install_caddy

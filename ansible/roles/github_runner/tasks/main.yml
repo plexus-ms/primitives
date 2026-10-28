@@ -1,0 +1,209 @@
+---
+- name: Require the forge organisation
+  ansible.builtin.assert:
+    that: github_runner_org | length > 0
+    fail_msg: github_runner_org names the forge organisation the runners register at.
+
+- name: Install what the runner and the jobs need
+  ansible.builtin.apt:
+    name:
+      - git
+      - curl
+      - tar
+      - unzip
+      - jq
+      - psmisc # killall, for the housekeeping
+    state: present
+
+# The docker group is root-equivalent; the host runs nothing else.
+- name: Create the runner user
+  ansible.builtin.user:
+    name: "{{ github_runner_user }}"
+    shell: /bin/bash
+    create_home: true
+    groups: [docker]
+    append: true
+
+# Each instance has a home of its own: the instances run as one user, and a
+# shared home lets one job's tool install overwrite a binary another job is
+# executing (mise-action restoring ~/.local/share/mise: "Text file busy").
+- name: Create the instance directories and homes
+  ansible.builtin.file:
+    path: "{{ github_runner_root }}/{{ item.0 }}{{ item.1 }}"
+    state: directory
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    mode: "{{ '0700' if item.1 else '0755' }}"
+  loop: "{{ range(1, github_runner_count + 1) | product(['', '/home']) | list }}"
+  loop_control:
+    label: "{{ github_runner_root }}/{{ item.0 }}{{ item.1 }}"
+
+- name: Download the runner
+  ansible.builtin.get_url:
+    url: https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz
+    dest: "{{ github_runner_root }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    checksum: "{{ github_runner_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Each instance is a full copy: the runner updates itself in place and keeps
+# its registration (.runner, .credentials) next to its binaries.
+- name: Unpack the runner into each instance
+  ansible.builtin.unarchive:
+    src: "{{ github_runner_root }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    dest: "{{ github_runner_root }}/{{ item }}"
+    remote_src: true
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    creates: "{{ github_runner_root }}/{{ item }}/config.sh"
+  loop: "{{ range(1, github_runner_count + 1) | list }}"
+
+- name: Install the runner's system dependencies (libicu, …)
+  ansible.builtin.command:
+    cmd: "{{ github_runner_root }}/1/bin/installdependencies.sh"
+  register: github_runner_deps
+  changed_when: "'Setting up' in github_runner_deps.stdout"
+
+- name: Check which instances are registered
+  ansible.builtin.stat:
+    path: "{{ github_runner_root }}/{{ item }}/.runner"
+  loop: "{{ range(1, github_runner_count + 1) | list }}"
+  register: github_runner_registered
+
+- name: Register the instances that are not yet
+  when: github_runner_registered.results | rejectattr('stat.exists') | list | length > 0
+  block:
+    - name: Require the token that mints registration tokens
+      ansible.builtin.assert:
+        that: github_runner_pat | length > 0
+        fail_msg: >-
+          An instance needs registering and GITHUB_RUNNER_PAT is empty: a
+          fine-grained token with "Self-hosted runners: read and write" on
+          the organisation, resolved from the vault through secrets.env.
+
+    # Valid for one hour, so it is minted per run and never stored.
+    - name: Mint a registration token
+      ansible.builtin.uri:
+        url: https://api.github.com/orgs/{{ github_runner_org }}/actions/runners/registration-token
+        method: POST
+        headers:
+          Accept: application/vnd.github+json
+          Authorization: Bearer {{ github_runner_pat }}
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 201
+      register: github_runner_token
+      no_log: true
+
+    - name: Register the instances
+      ansible.builtin.command:
+        cmd: >-
+          ./config.sh --unattended --replace
+          --url https://github.com/{{ github_runner_org }}
+          --token {{ github_runner_token.json.token }}
+          --name {{ inventory_hostname }}-{{ item.item }}
+          --work _work
+          {{ ('--labels ' + (github_runner_labels | join(','))) if github_runner_labels | length > 0 else '' }}
+        chdir: "{{ github_runner_root }}/{{ item.item }}"
+      become: true
+      become_user: "{{ github_runner_user }}"
+      loop: "{{ github_runner_registered.results }}"
+      loop_control:
+        label: "{{ inventory_hostname }}-{{ item.item }}"
+      when: not item.stat.exists
+      no_log: true
+      changed_when: true
+
+# One template unit, one instance per directory: the shape of the runner's
+# own svc.sh unit (KillMode=process lets a job's processes outlive a stop of
+# the service, so a restart of the service does not kill a running job).
+- name: Install the runner service template
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/github-runner@.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=GitHub Actions runner {{ inventory_hostname }}-%i
+      After=network-online.target docker.service
+      Wants=network-online.target
+
+      [Service]
+      User={{ github_runner_user }}
+      Environment=HOME={{ github_runner_root }}/%i/home
+      WorkingDirectory={{ github_runner_root }}/%i
+      ExecStart={{ github_runner_root }}/%i/bin/runsvc.sh
+      KillMode=process
+      KillSignal=SIGTERM
+      TimeoutStopSec=5min
+      Restart=always
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload systemd
+
+- name: Install the housekeeping script
+  ansible.builtin.copy:
+    src: github-runner-housekeeping
+    dest: /usr/local/sbin/github-runner-housekeeping
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the housekeeping service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/github-runner-housekeeping.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=GitHub Actions runner housekeeping
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      Environment=ROOT={{ github_runner_root }}
+      Environment=RUNNER_USER={{ github_runner_user }}
+      Environment=PRUNE_DAYS={{ github_runner_prune_days }}
+      Environment=DISK_ALERT_PERCENT={{ github_runner_disk_alert_percent }}
+      ExecStart=/usr/local/sbin/github-runner-housekeeping
+  notify: Reload systemd
+
+- name: Install the housekeeping timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/github-runner-housekeeping.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=GitHub Actions runner housekeeping
+
+      [Timer]
+      OnCalendar=*-*-* {{ github_runner_housekeeping_time }}:00
+      RandomizedDelaySec=15m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the instances
+  ansible.builtin.systemd_service:
+    name: github-runner@{{ item }}.service
+    enabled: true
+    state: started
+  loop: "{{ range(1, github_runner_count + 1) | list }}"
+
+- name: Enable the housekeeping timer
+  ansible.builtin.systemd_service:
+    name: github-runner-housekeeping.timer
+    enabled: true
+    state: started
