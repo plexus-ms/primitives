@@ -18,9 +18,14 @@
 // inlines a devDependency into its artifact is outside the rule and says so
 // where it is published.
 //
+// A second rule covers the pins the bot moves outside a manifest, through a
+// Renovate regex manager (the copier version in lib's copier.ts): a change to
+// a package's shipped source, its `src/` minus tests, owes a patch too. On a
+// bot branch nothing else edits source, so the rule stays that narrow.
+//
 //   plx changeset                             # on a bot branch, in the repo's root
 //   plx changeset --base origin/main -n .     # what it would write
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parse } from 'yaml';
 import type { Context } from './context.ts';
 import { ExecError } from './io.ts';
@@ -30,6 +35,9 @@ export const CHANGESET_DIR = '.changeset';
 
 const FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies'] as const;
 type Field = (typeof FIELDS)[number];
+
+/** A test file or test helper: under `src/`, but never in the published artifact. */
+const TEST_FILE = /\.test\.[cm]?[jt]sx?$|\/testing\//;
 
 /** The part of a package.json the verb reads. */
 export interface Manifest {
@@ -69,6 +77,8 @@ export interface ChangesetInput {
   catalogsAfter: Catalogs;
   /** Package names changesets is told to ignore. */
   ignore: string[];
+  /** Every path the branch changed since the merge base, relative to the repo's root. */
+  files?: string[];
   /** Whether the file this branch names exists already. */
   exists: boolean;
   /** The repo's root, which the plan's steps are addressed to; the cwd when absent. */
@@ -81,6 +91,8 @@ export interface Changeset {
   /** Package name → bump; empty when nothing is owed. */
   releases: Record<string, 'patch' | 'major'>;
   changes: DependencyChange[];
+  /** Shipped source files the branch changed, by package: a pin moved outside the manifest. */
+  sources: { package: string; file: string }[];
   /** The file's text, or undefined when nothing is owed. */
   content?: string;
   plan: Plan;
@@ -100,10 +112,17 @@ export function changesetPath(branch: string): string {
 export function planChangeset(input: ChangesetInput): Changeset {
   const path = changesetPath(input.branch);
   const changes: DependencyChange[] = [];
+  const sources: { package: string; file: string }[] = [];
   const releases: Record<string, 'patch' | 'major'> = {};
   for (const diff of input.packages) {
     const { before, after } = diff;
     if (!before || !after?.name || after.private || input.ignore.includes(after.name)) continue;
+    const src = `${dirname(diff.path)}/src/`;
+    for (const file of input.files ?? []) {
+      if (!file.startsWith(src) || TEST_FILE.test(file)) continue;
+      sources.push({ package: after.name, file });
+      releases[after.name] ??= 'patch';
+    }
     for (const field of FIELDS) {
       const names = new Set([...Object.keys(before[field] ?? {}), ...Object.keys(after[field] ?? {})]);
       for (const dependency of [...names].sort()) {
@@ -118,16 +137,20 @@ export function planChangeset(input: ChangesetInput): Changeset {
   }
 
   const root = input.root;
-  if (changes.length === 0) {
+  if (changes.length === 0 && sources.length === 0) {
     const remove = run('rm', ['-f', path], root ? { cwd: root } : {});
-    return { path, releases, changes, plan: input.exists ? [remove] : [] };
+    return { path, releases, changes, sources, plan: input.exists ? [remove] : [] };
   }
   const header = Object.entries(releases)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, bump]) => `'${name}': ${bump}`);
-  const lines = [...new Set(changes.map(describeChange))].sort((a, b) => a.localeCompare(b));
+  const described = [
+    ...changes.map(describeChange),
+    ...sources.map((s) => `Update the version pinned in \`${s.file}\``),
+  ];
+  const lines = [...new Set(described)].sort((a, b) => a.localeCompare(b));
   const content = `---\n${header.join('\n')}\n---\n\n${lines.join('\n')}\n`;
-  return { path, releases, changes, content, plan: [write(root ? join(root, path) : path, content)] };
+  return { path, releases, changes, sources, content, plan: [write(root ? join(root, path) : path, content)] };
 }
 
 function describeChange(c: DependencyChange): string {
@@ -211,6 +234,7 @@ export async function readChangeset(ctx: Context, dir: string, base: string, bra
     catalogsBefore: parseCatalogs(await show('pnpm-workspace.yaml')),
     catalogsAfter: parseCatalogs(workspaceAfter),
     ignore,
+    files: (await git(['diff', '--name-only', mergeBase, 'HEAD'])).split('\n').filter(Boolean),
     exists: entries.some((e) => !e.directory && `${CHANGESET_DIR}/${e.name}` === path),
     root: dir,
   });

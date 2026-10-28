@@ -102,6 +102,38 @@ test('a catalog entry bump reaches the packages that consume it', () => {
   assert.deepEqual(workspaceGlobs(undefined), []);
 });
 
+test('a pin moved in shipped source owes a patch; tests, other packages and devDependencies do not', () => {
+  const lib = { name: '@x/lib', devDependencies: { typescript: '^5' } } as Manifest;
+  const cs = planChangeset({
+    ...input([
+      { path: 'packages/lib/package.json', before: lib, after: lib },
+      { path: 'packages/cli/package.json', before: { name: '@x/cli' }, after: { name: '@x/cli' } },
+      { path: 'packages/fresh/package.json', after: { name: '@x/fresh' } },
+    ]),
+    files: [
+      'packages/lib/src/copier.ts',
+      'packages/lib/src/copier.test.ts',
+      'packages/lib/src/testing/fakeIo.ts',
+      'packages/lib/README.md',
+      'packages/fresh/src/index.ts',
+      'renovate.json',
+    ],
+  });
+  assert.deepEqual(cs.releases, { '@x/lib': 'patch' });
+  assert.deepEqual(cs.sources, [{ package: '@x/lib', file: 'packages/lib/src/copier.ts' }]);
+  assert.equal(cs.content, "---\n'@x/lib': patch\n---\n\nUpdate the version pinned in `packages/lib/src/copier.ts`\n");
+
+  const both = planChangeset({
+    ...input([{ path: 'packages/std/package.json', before: std({ a: '^1' }), after: std({ a: '^2' }) }]),
+    files: ['packages/std/src/pin.ts'],
+  });
+  assert.deepEqual(both.releases, { '@x/std': 'patch' });
+  assert.equal(
+    both.content,
+    "---\n'@x/std': patch\n---\n\nUpdate `a` from ^1 to ^2\nUpdate the version pinned in `packages/std/src/pin.ts`\n",
+  );
+});
+
 test('readChangeset reads the merge base through git and the branch through the tree', async () => {
   const beforeStd = JSON.stringify(std({ 'tailwind-merge': '^3.0.0' }));
   const afterStd = JSON.stringify(std({ 'tailwind-merge': '^3.7.0' }));
@@ -118,6 +150,7 @@ test('readChangeset reads the merge base through git and the branch through the 
     assert.equal(cwd, '/repo');
     if (args[0] === 'rev-parse') return 'renovate/tailwind-merge-3.x\n';
     if (args[0] === 'merge-base') return 'abc123\n';
+    if (args.join(' ') === 'diff --name-only abc123 HEAD') return 'packages/std/package.json\npnpm-lock.yaml\n';
     if (args[0] === 'show' && args[1] === 'abc123:packages/std/package.json') return beforeStd;
     if (args[0] === 'show' && args[1] === 'abc123:packages/cli/package.json') return cli;
     if (args[0] === 'show' && args[1] === 'abc123:pnpm-workspace.yaml') return workspace;

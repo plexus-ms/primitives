@@ -15,7 +15,9 @@ import { contextOf } from '../program.ts';
 export function register(program: Command): void {
   program
     .command('changeset')
-    .description('write the changeset a dependency bump owes: a patch per package whose runtime dependencies moved')
+    .description(
+      'write the changeset a dependency bump owes: a patch per package whose runtime dependencies or shipped source moved',
+    )
     .argument('[dir]', 'a checkout of the package repo, on the bump branch', '.')
     .option('--base <ref>', 'the trunk the branch is diffed against, at the merge base', 'origin/main')
     .option('--branch <name>', 'the branch name that names the file (default: the checked-out branch)')
