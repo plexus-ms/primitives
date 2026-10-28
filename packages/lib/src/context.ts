@@ -63,6 +63,7 @@ export class Context {
    */
   result<T>(data: T, human: (data: T) => string = renderHuman): void {
     const text = this.json ? JSON.stringify(data, null, 2) : human(data);
+    if (text === '') return; // an empty set prints nothing, not a blank line
     this.io.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
   }
 
