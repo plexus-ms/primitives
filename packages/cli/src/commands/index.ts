@@ -8,10 +8,11 @@
 // --json, verbosity and --yes then apply without code of the command's own.
 // Keep the module's header comment the hand-run form of the verb.
 import type { Command } from 'commander';
+import { register as changeset } from './changeset.ts';
 import { register as doctor } from './doctor.ts';
 import { register as overview } from './overview.ts';
 import { register as propagate } from './propagate.ts';
 import { register as requirements } from './requirements.ts';
 import { register as ship } from './ship.ts';
 
-export const commands: ((program: Command) => void)[] = [overview, doctor, ship, propagate, requirements];
+export const commands: ((program: Command) => void)[] = [overview, doctor, ship, propagate, requirements, changeset];

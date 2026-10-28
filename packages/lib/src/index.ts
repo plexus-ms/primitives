@@ -18,6 +18,18 @@ export {
   today,
 } from './bookkeeping.ts';
 export { CATALOG_DIRS, type Catalog, type Module, parseModule, readCatalog } from './catalog.ts';
+export {
+  CHANGESET_DIR,
+  type Changeset,
+  type ChangesetInput,
+  changesetPath,
+  type DependencyChange,
+  type Manifest,
+  parseCatalogs,
+  planChangeset,
+  readChangeset,
+  workspaceGlobs,
+} from './changeset.ts';
 export { type Consumer, expectedBranch, findConsumers, presetSource, type Site } from './consumers.ts';
 export { Context, type Options } from './context.ts';
 export { ANSWERS_FILE, type Answers, parseAnswers, TEMPLATE_FILES } from './copier.ts';
