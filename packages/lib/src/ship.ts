@@ -1,8 +1,8 @@
 // ship: the release train (§ 1.5 PLX). Every train repo ships under ONE
 // version, tagged identically whether or not it changed:
 //
-//   preflight (every train repo on main, clean, not behind origin, the latest
-//   tags in agreement) → write the train bookkeeping (bookkeeping.ts: galaxy
+//   preflight (plx itself not behind its newest release, self.ts; every train
+//   repo on main, clean, not behind origin, the latest tags in agreement) → write the train bookkeeping (bookkeeping.ts: galaxy
 //   version, the preset's collection pin, workflow-ref examples, the map's
 //   version and timestamp, `changed` on every standard module whose extracted
 //   requirements moved) and commit it → tag every train repo → push →
@@ -33,6 +33,7 @@ import { frontmatterField } from './frontmatter.ts';
 import { type Plan, run, write } from './plan.ts';
 import { propagate, type Summary } from './propagate.ts';
 import { extractRequirements, MAP_PAGE, modulePages } from './requirements.ts';
+import { preflightSelf } from './self.ts';
 import { preflightRelease, readTrain, resolveVersion, type Train, type TrainRepo, UPSTREAM } from './train.ts';
 
 export interface ShipOptions {
@@ -44,6 +45,8 @@ export interface ShipOptions {
   propagateOnly?: boolean;
   /** The date stamped on the map, `YYYY-MM-DD`; default: today. */
   today?: string;
+  /** The running plx's version: when given, refuse to run behind its newest release (self.ts). */
+  plx?: string;
 }
 
 export interface ShipResult extends Summary {
@@ -54,6 +57,7 @@ export interface ShipResult extends Summary {
 export async function ship(ctx: Context, options: ShipOptions): Promise<ShipResult> {
   const upstream = join(options.workspace, UPSTREAM);
   const propagateOnly = options.propagateOnly ?? false;
+  if (options.plx) await preflightSelf(ctx, options.plx);
   const train = await readTrain(ctx, upstream);
   if (!propagateOnly) await preflightRelease(ctx, train);
   const next = resolveVersion(train, options.train, propagateOnly);

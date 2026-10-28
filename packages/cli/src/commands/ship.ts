@@ -11,7 +11,7 @@
 import { resolve } from 'node:path';
 import { isClean, type Summary, ship } from '@plexus-ms/lib';
 import type { Command } from 'commander';
-import { contextOf } from '../program.ts';
+import { contextOf, version } from '../program.ts';
 
 export function register(program: Command): void {
   program
@@ -21,7 +21,7 @@ export function register(program: Command): void {
     .option('--train <version>', 'the train version, plain semver (default: minor+1 over the latest train)')
     .action(async (dir: string, opts: { train?: string }, command: Command) => {
       const ctx = contextOf(command);
-      const result = await ship(ctx, { workspace: resolve(dir), train: opts.train });
+      const result = await ship(ctx, { workspace: resolve(dir), train: opts.train, plx: version });
       ctx.result(result, (r) => renderSummary(r, `plx -y ship --train ${r.train} ${dir}`));
       if (!isClean(result)) process.exitCode = 1;
     });

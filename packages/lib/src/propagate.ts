@@ -1,7 +1,7 @@
 // propagate: bring every consumer of the presets up to a train (§ 3 PLX-Updates).
 //
-// `copier update` at every consumer site in the workspace (tenant repo roots
-// and their apps/*), then the marker synced to the answers file, lockfiles
+// `copier update`, at the version plx pins (copier.ts), at every consumer site
+// in the workspace (tenant repo roots and their apps/*), then the marker synced to the answers file, lockfiles
 // refreshed where manifests moved, and the consumers' hand-owned workflows
 // pinned to the train. A consumer is touched only on its expected branch and
 // with no tracked modifications (consumers.ts). Propagation never aborts the
@@ -22,7 +22,7 @@ import { join, relative } from 'node:path';
 import { bumpWorkflowRefs, hasConflictMarkers, hasUnmergedEntries, syncMarker, WORKFLOW_REF } from './bookkeeping.ts';
 import { type Consumer, findConsumers, presetSource, type Site } from './consumers.ts';
 import type { Context } from './context.ts';
-import { ANSWERS_FILE, parseAnswers } from './copier.ts';
+import { ANSWERS_FILE, copierVia, parseAnswers } from './copier.ts';
 import { MARKER_FILE } from './marker.ts';
 import { overview } from './overview.ts';
 import { run, write } from './plan.ts';
@@ -144,15 +144,17 @@ async function updateSite(
       );
       await previewCommit(repo, `plx preview: ${site.rel} reads ${localPreset} from the local checkout`);
       await ctx.stage(
-        run('copier', ['update', '--skip-answered', '--trust', '--defaults', '--skip-tasks', '--vcs-ref', 'main'], {
-          cwd: target,
-        }),
+        run(
+          'mise',
+          copierVia(['update', '--skip-answered', '--trust', '--defaults', '--skip-tasks', '--vcs-ref', 'main']),
+          { cwd: target },
+        ),
       );
     } else {
       ctx.say(`→ ${site.rel}: copier update`);
       // Unattended, a new question takes its default; on a terminal copier asks.
       const args = ['update', '--skip-answered', '--trust', ...(ctx.yes ? ['--defaults'] : [])];
-      await ctx.apply([run('copier', args, { cwd: target, interactive: true })]);
+      await ctx.apply([run('mise', copierVia(args), { cwd: target, interactive: true })]);
     }
   } catch (error) {
     ctx.say(`  ✗ FAILED — copier update exited nonzero${detail(error)}`);

@@ -7,6 +7,14 @@ import { parse } from 'yaml';
 export const ANSWERS_FILE = '.copier-answers.yml';
 export const TEMPLATE_FILES = ['copier.yml', 'copier.yaml'];
 
+// The copier every propagation runs, pinned here so that it travels with plx:
+// a consumer's update never depends on whichever copier the operator's machine
+// has on its PATH. mise installs it on first use.
+export const COPIER_VERSION = '9.19.1';
+
+/** `copier <args>` at the pinned version, as arguments to `mise`. */
+export const copierVia = (args: string[]): string[] => ['exec', `copier@${COPIER_VERSION}`, '--', 'copier', ...args];
+
 export interface Answers {
   /** The template's ref the project was last updated to, if recorded. */
   commit?: string;
