@@ -31,7 +31,7 @@
   "devDependencies": {
     "@inquirer/prompts": "^8.0.0",
     "@plexus-ms/lib": "workspace:*",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.6.5",
     "commander": "^15.0.0",
     "esbuild": "^0.28.2",
     "typescript": "catalog:"
