@@ -9,7 +9,7 @@
 import { resolve } from 'node:path';
 import { isClean, ship } from '@plexus-ms/lib';
 import type { Command } from 'commander';
-import { contextOf } from '../program.ts';
+import { contextOf, version } from '../program.ts';
 import { renderSummary } from './ship.ts';
 
 export function register(program: Command): void {
@@ -20,7 +20,7 @@ export function register(program: Command): void {
     .option('--train <version>', 'the train to propagate (default: the current one)')
     .action(async (dir: string, opts: { train?: string }, command: Command) => {
       const ctx = contextOf(command);
-      const result = await ship(ctx, { workspace: resolve(dir), train: opts.train, propagateOnly: true });
+      const result = await ship(ctx, { workspace: resolve(dir), train: opts.train, propagateOnly: true, plx: version });
       ctx.result(result, (r) => renderSummary(r, `plx -y propagate --train ${r.train} ${dir}`));
       if (!isClean(result)) process.exitCode = 1;
     });

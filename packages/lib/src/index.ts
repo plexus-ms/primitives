@@ -39,7 +39,7 @@ export {
 } from './changeset.ts';
 export { type Consumer, expectedBranch, findConsumers, presetSource, type Site } from './consumers.ts';
 export { Context, type Options } from './context.ts';
-export { ANSWERS_FILE, type Answers, parseAnswers, TEMPLATE_FILES } from './copier.ts';
+export { ANSWERS_FILE, type Answers, COPIER_VERSION, copierVia, parseAnswers, TEMPLATE_FILES } from './copier.ts';
 export { type Deploy, type DeployOptions, deploy, q as shellQuote, renderCompose } from './deploy.ts';
 export {
   type DeployTargets,
@@ -74,6 +74,7 @@ export {
   type Scan,
   scanPage,
 } from './requirements.ts';
+export { preflightSelf, SELF_PACKAGE } from './self.ts';
 export { type ShipOptions, type ShipResult, ship } from './ship.ts';
 export {
   isTrainVersion,

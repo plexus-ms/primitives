@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, test } from 'node:test';
 import { Context, type Options } from './context.ts';
+import { COPIER_VERSION } from './copier.ts';
 import { realIo } from './io.ts';
 import { type ShipResult, ship } from './ship.ts';
 import { TRAIN_REPOS } from './train.ts';
@@ -61,7 +62,14 @@ sed -i.bak 's/^_commit: .*/_commit: next/' .copier-answers.yml && rm -f .copier-
 [ -z "\${FAKE_COPIER_CONFLICT:-}" ] || case "$PWD" in *"$FAKE_COPIER_CONFLICT"*) printf '<<<<<<< before\\nx\\n=======\\ny\\n>>>>>>> after\\n' > template-owned.txt ;; esac
 `,
 );
-script('mise', 'echo "mise $*" >> "$FAKE_LOG"\n');
+// Fake mise: logs, and runs the pinned copier (`mise exec copier@X -- copier …`)
+// as the fake copier above; anything else it only logs.
+script(
+  'mise',
+  `echo "mise $*" >> "$FAKE_LOG"
+if [ "$1" = exec ] && [[ "$2" == copier@* ]] && [ "$3" = -- ]; then shift 3; exec "$@"; fi
+`,
+);
 process.env.PATH = `${FAKE_BIN}:${process.env.PATH}`;
 
 // ── fixture ──────────────────────────────────────────────────────────────────
@@ -247,6 +255,11 @@ test('dry run previews propagation in scratch clones and changes nothing', async
   );
   const runs = copierRuns();
   assert.equal(runs.length, 3, 'copier ran for 3 sites');
+  assert.equal(
+    fakeLog().filter((l) => l.startsWith(`mise exec copier@${COPIER_VERSION} -- copier update`)).length,
+    3,
+    'copier ran at the version plx pins',
+  );
   assert.ok(
     runs.every((l) => !l.startsWith(`${WS}/`)),
     'copier ran outside the workspace (scratch clones)',

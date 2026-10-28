@@ -11,7 +11,8 @@ import { Context, type Options, realIo } from '@plexus-ms/lib';
 import { Command, Option } from 'commander';
 import { commands } from './commands/index.ts';
 
-const { version, description } = createRequire(import.meta.url)('../package.json') as {
+/** This plx's version, which `ship` and `propagate` hold against the newest release. */
+export const { version, description } = createRequire(import.meta.url)('../package.json') as {
   version: string;
   description: string;
 };
