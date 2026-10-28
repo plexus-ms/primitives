@@ -20,6 +20,6 @@ export async function preflightSelf(ctx: Context, running: string): Promise<void
   }
   if (compareTrains(running, latest) < 0)
     throw new Error(
-      `plx ${running} is behind ${latest}, the newest release; update it first: mise cache clear && mise up npm:${SELF_PACKAGE}`,
+      `plx ${running} is behind ${latest}, the newest release; update it first: mise up npm:${SELF_PACKAGE}`,
     );
 }
