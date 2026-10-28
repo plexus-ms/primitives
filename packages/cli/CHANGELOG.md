@@ -1,5 +1,16 @@
 # @plexus-ms/cli
 
+## 0.7.0
+
+### Minor Changes
+
+- 5364d2c: `ship` and `propagate` refuse to run behind the newest `@plexus-ms/cli` on the registry (asked with `npm view`; an unreachable registry only warns), and propagation runs copier through `mise exec copier@<version>` at the version plx pins (`COPIER_VERSION`, 9.19.1), so the copier a consumer is updated with travels with plx instead of depending on the operator's PATH.
+
+### Patch Changes
+
+- Updated dependencies [5364d2c]
+  - @plexus-ms/lib@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes
