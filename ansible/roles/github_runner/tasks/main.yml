@@ -123,10 +123,12 @@
       no_log: true
       changed_when: true
 
+# The runner refuses a hook whose path does not end in .sh, .ps1 or .js, and
+# fails every job over it.
 - name: Install the job-completed hook
   ansible.builtin.copy:
-    src: github-runner-job-completed
-    dest: /usr/local/bin/github-runner-job-completed
+    src: github-runner-job-completed.sh
+    dest: /usr/local/bin/github-runner-job-completed.sh
     owner: root
     group: root
     mode: "0755"
@@ -151,7 +153,7 @@
       [Service]
       User={{ github_runner_user }}
       Environment=HOME={{ github_runner_root }}/%i/home
-      Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/github-runner-job-completed
+      Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/github-runner-job-completed.sh
       Environment=pnpm_config_store_dir={{ github_runner_cache_dir }}/pnpm-store
       Environment=UV_CACHE_DIR={{ github_runner_cache_dir }}/uv
       Environment=PLAYWRIGHT_BROWSERS_PATH={{ github_runner_cache_dir }}/ms-playwright
