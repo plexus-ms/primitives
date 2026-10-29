@@ -42,3 +42,14 @@ test('a dirty star does not end the colour of the git facet', () => {
   const esc = (code: number, text: string) => `\u001b[${code}m${text}\u001b[0m`;
   assert.ok(line.includes(`${esc(32, '[main')}${esc(33, '*')}${esc(32, ' 1.0.0]')}`));
 });
+
+test('a synced git facet shows the commits behind and ahead of its upstream', () => {
+  const dir = (ahead: number, behind: number): Directory => ({
+    name: 'r',
+    path: '/r',
+    git: { branch: 'main', dirty: true, remote: 'gh:t/r', ahead, behind },
+    children: [],
+  });
+  assert.equal(renderTree(dir(1, 3), style(false), false), 'r/ [main* ↓3 ↑1 → gh:t/r]');
+  assert.equal(renderTree(dir(0, 0), style(false), false), 'r/ [main* → gh:t/r]');
+});

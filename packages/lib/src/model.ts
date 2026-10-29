@@ -26,6 +26,10 @@ export interface GitFacet {
   tag?: string;
   /** The `origin` remote, shortened: `gh:org/repo` for GitHub. */
   remote?: string;
+  /** Commits on the branch not on its upstream; read only by a synced overview, and only with an upstream. */
+  ahead?: number;
+  /** Commits on the upstream not on the branch, as of the fetch a synced overview made. */
+  behind?: number;
 }
 
 export interface TemplateFacet {

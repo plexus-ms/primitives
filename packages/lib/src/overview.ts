@@ -7,6 +7,7 @@
 //
 //   plx overview            # map the current directory
 //   plx overview ~/dev      # map somewhere else
+//   plx overview --sync     # fetch every repo first, to show what is behind
 import { join } from 'node:path';
 import type { Context } from './context.ts';
 import { ANSWERS_FILE, parseAnswers, TEMPLATE_FILES } from './copier.ts';
@@ -41,10 +42,48 @@ export const PRUNED = new Set([
 export interface ScanOptions {
   /** Read the git facets (four git calls per repo); off for verbs that only need markers. */
   git?: boolean;
+  /** Fetch every repo's remotes, then count commits ahead of and behind the upstream; slow, so opt-in. */
+  fetch?: boolean;
 }
 
-export function overview(ctx: Context, root: string, options: ScanOptions = {}): Promise<Directory> {
-  return walk(ctx, root, root.replace(/\/+$/, '').split('/').pop() || root, { git: true, ...options });
+/** Fetches in flight at once: enough to hide network latency, few enough not to trip a host's rate limit. */
+const FETCHES = 8;
+
+export async function overview(ctx: Context, root: string, options: ScanOptions = {}): Promise<Directory> {
+  const opts = { git: true, fetch: false, ...options };
+  const tree = await walk(ctx, root, root.replace(/\/+$/, '').split('/').pop() || root, opts);
+  if (opts.git && opts.fetch) await syncAll(ctx, repos(tree));
+  return tree;
+}
+
+function repos(dir: Directory): Directory[] {
+  return [...(dir.git ? [dir] : []), ...dir.children.flatMap(repos)];
+}
+
+async function syncAll(ctx: Context, dirs: Directory[]): Promise<void> {
+  const queue = [...dirs];
+  const worker = async () => {
+    for (let dir = queue.shift(); dir; dir = queue.shift()) await sync(ctx, dir);
+  };
+  await Promise.all(Array.from({ length: Math.min(FETCHES, queue.length) }, worker));
+}
+
+/** Fetch all remotes (only remote-tracking refs change), then compare the branch with its upstream. */
+async function sync(ctx: Context, dir: Directory): Promise<void> {
+  const facet = dir.git;
+  if (!facet) return;
+  try {
+    await ctx.read('git', ['fetch', '--all', '--quiet'], { cwd: dir.path });
+  } catch (error) {
+    dir.problems ??= [];
+    dir.problems.push(`git fetch: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  // No upstream (detached, or a branch never pushed) leaves nothing to compare against.
+  const counts = await git(ctx, dir.path, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']);
+  const [ahead, behind] = (counts ?? '').split(/\s+/).map(Number);
+  if (ahead === undefined || behind === undefined || Number.isNaN(ahead) || Number.isNaN(behind)) return;
+  facet.ahead = ahead;
+  facet.behind = behind;
 }
 
 async function walk(ctx: Context, path: string, name: string, options: Required<ScanOptions>): Promise<Directory> {

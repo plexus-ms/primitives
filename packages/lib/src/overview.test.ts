@@ -78,3 +78,37 @@ test('overview maps the facets of a workspace and prunes what carries none', asy
   );
   assert.equal(web?.children[0]?.children[0]?.declaration?.plexus, '0.62.0');
 });
+
+test('overview --sync fetches every repo and counts the drift from its upstream', async () => {
+  const fetched: string[] = [];
+  const synced = (cwd: string, args: string[]): string | undefined => {
+    const a = args.join(' ');
+    if (a === 'fetch --all --quiet') {
+      fetched.push(cwd);
+      return cwd === '/ws/tenant/web' ? undefined : '';
+    }
+    if (a === 'rev-list --left-right --count HEAD...@{upstream}') return cwd === '/ws/preset' ? '1\t3\n' : undefined;
+    return gitOf(cwd, args);
+  };
+  const ctx = new Context({}, fakeIo({ ws: workspace }, synced));
+  const tree = await overview(ctx, '/ws', { fetch: true });
+  assert.deepEqual(fetched.sort(), ['/ws/preset', '/ws/tenant/web']);
+  const [, preset, tenant] = tree.children;
+  assert.equal(preset?.git?.ahead, 1);
+  assert.equal(preset?.git?.behind, 3);
+  const web = tenant?.children[0];
+  assert.equal(web?.git?.behind, undefined);
+  assert.match(web?.problems?.[0] ?? '', /^git fetch: /);
+});
+
+test('overview without --sync fetches nothing', async () => {
+  const ctx = new Context(
+    {},
+    fakeIo({ ws: workspace }, (cwd, args) => {
+      assert.notEqual(args[0], 'fetch');
+      return gitOf(cwd, args);
+    }),
+  );
+  const tree = await overview(ctx, '/ws');
+  assert.equal(tree.children[1]?.git?.behind, undefined);
+});
