@@ -3,7 +3,8 @@
 // The reader is lib's `overview`; this file maps the argument onto it and
 // renders the tree. Each directory that carries a facet is annotated:
 //
-//   [<branch><* if dirty> <tag> → <remote>]   git: tag = latest on the default branch
+//   [<branch><* if dirty> <tag> → <remote>]   git: tag = latest on the default branch;
+//                                             --sync fetches first and adds ↓<behind> ↑<ahead>
 //   [template <tag>]                          a copier template
 //   [copier <commit> ← <src>]                 a copier-managed project
 //   [<kind> <plexus version>]                 a declared Plexus unit (PLEXUS.md);
@@ -19,11 +20,12 @@ export function register(program: Command): void {
     .command('overview')
     .description('map the git repos, copier templates and projects, and Plexus units under a directory')
     .argument('[dir]', 'directory to map', '.')
+    .option('-s, --sync', 'fetch every repo first, to show branches behind (or ahead of) their upstream')
     .option('--color', 'colour the tree even when piped')
     .option('--no-color', 'never colour the tree')
-    .action(async (dir: string, opts: { color?: boolean }, command: Command) => {
+    .action(async (dir: string, opts: { sync?: boolean; color?: boolean }, command: Command) => {
       const ctx = contextOf(command);
-      const tree = await overview(ctx, resolve(dir));
+      const tree = await overview(ctx, resolve(dir), { fetch: opts.sync ?? false });
       const s = style(opts.color ?? colorByDefault());
       ctx.result(tree, (t) => renderTree(t, s, ctx.verbose >= 1));
     });
@@ -49,10 +51,11 @@ export function renderTree(root: Directory, s: Style, modules: boolean): string 
 function annotate(dir: Directory, s: Style, modules: boolean): string {
   const tags: string[] = [];
   if (dir.git) {
-    const { branch, dirty, tag, remote } = dir.git;
+    const { branch, dirty, tag, remote, ahead, behind } = dir.git;
     // Pieces coloured one by one: a nested reset would end the green at the star.
+    const drift = `${behind ? ` ↓${behind}` : ''}${ahead ? ` ↑${ahead}` : ''}`;
     const rest = `${tag ? ` ${tag}` : ''}${remote ? ` → ${remote}` : ''}]`;
-    tags.push(`${s.ok(`[${branch}`)}${dirty ? s.warn('*') : ''}${s.ok(rest)}`);
+    tags.push(`${s.ok(`[${branch}`)}${dirty ? s.warn('*') : ''}${drift ? s.warn(drift) : ''}${s.ok(rest)}`);
   }
   if (dir.template) tags.push(s.note(`[template ${dir.template.tag ?? 'untagged'}]`));
   if (dir.copier) {
