@@ -39,9 +39,14 @@ github_runner_labels: []
 github_runner_pat: "{{ lookup('env', 'GITHUB_RUNNER_PAT') | default('', true) }}"
 
 # Housekeeping, nightly: working directories of repos untouched this many
-# days (on idle instances only), Docker images and build cache unused that
-# long, ssh-agents deploy jobs left behind. Fails, and so mails through
+# days (on idle instances only); containers older than this many hours,
+# which no job runs for; unused volumes and images (named volumes and images
+# only while no job runs); the build cache down to this size, least recently
+# used first; ssh-agents deploy jobs left behind. Fails, and so mails through
 # configure_mail, when the root file system is fuller than this afterwards.
+# After every job, a hook prunes the anonymous volumes of the job's services.
 github_runner_housekeeping_time: "05:00"
 github_runner_prune_days: 7
+github_runner_container_hours: 6
+github_runner_build_cache_max: 15GB
 github_runner_disk_alert_percent: 85

@@ -114,9 +114,19 @@
       no_log: true
       changed_when: true
 
+- name: Install the job-completed hook
+  ansible.builtin.copy:
+    src: github-runner-job-completed
+    dest: /usr/local/bin/github-runner-job-completed
+    owner: root
+    group: root
+    mode: "0755"
+
 # One template unit, one instance per directory: the shape of the runner's
 # own svc.sh unit (KillMode=process lets a job's processes outlive a stop of
-# the service, so a restart of the service does not kill a running job).
+# the service, so a restart of the service does not kill a running job). A
+# change here reaches a running instance on its next restart, which is left
+# to the operator: `systemctl restart github-runner@<n>` while it is idle.
 - name: Install the runner service template
   ansible.builtin.copy:
     dest: /etc/systemd/system/github-runner@.service
@@ -132,6 +142,7 @@
       [Service]
       User={{ github_runner_user }}
       Environment=HOME={{ github_runner_root }}/%i/home
+      Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/github-runner-job-completed
       WorkingDirectory={{ github_runner_root }}/%i
       ExecStart={{ github_runner_root }}/%i/bin/runsvc.sh
       KillMode=process
@@ -169,6 +180,8 @@
       Environment=ROOT={{ github_runner_root }}
       Environment=RUNNER_USER={{ github_runner_user }}
       Environment=PRUNE_DAYS={{ github_runner_prune_days }}
+      Environment=CONTAINER_HOURS={{ github_runner_container_hours }}
+      Environment=BUILD_CACHE_MAX={{ github_runner_build_cache_max }}
       Environment=DISK_ALERT_PERCENT={{ github_runner_disk_alert_percent }}
       ExecStart=/usr/local/sbin/github-runner-housekeeping
   notify: Reload systemd
