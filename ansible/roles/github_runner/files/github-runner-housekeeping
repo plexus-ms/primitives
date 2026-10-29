@@ -1,12 +1,13 @@
 #!/bin/sh
 # Nightly housekeeping for the GitHub Actions runners on this host. Managed by
-# Ansible (github_runner); ROOT, RUNNER_USER, PRUNE_DAYS, CONTAINER_HOURS,
-# BUILD_CACHE_MAX and DISK_ALERT_PERCENT come from the unit's environment.
-# Hand-runnable:
-#   ROOT=/opt/actions-runner RUNNER_USER=runner PRUNE_DAYS=7 CONTAINER_HOURS=6 \
-#   BUILD_CACHE_MAX=15GB DISK_ALERT_PERCENT=85 github-runner-housekeeping
+# Ansible (github_runner); ROOT, CACHE_DIR, RUNNER_USER, PRUNE_DAYS,
+# CONTAINER_HOURS, BUILD_CACHE_MAX and DISK_ALERT_PERCENT come from the unit's
+# environment. Hand-runnable:
+#   ROOT=/opt/actions-runner CACHE_DIR=/var/cache/github-runner \
+#   RUNNER_USER=runner PRUNE_DAYS=7 CONTAINER_HOURS=6 BUILD_CACHE_MAX=15GB \
+#   DISK_ALERT_PERCENT=85 github-runner-housekeeping
 set -eu
-: "${ROOT:?}" "${RUNNER_USER:?}" "${PRUNE_DAYS:?}" "${CONTAINER_HOURS:?}" "${BUILD_CACHE_MAX:?}" "${DISK_ALERT_PERCENT:?}"
+: "${ROOT:?}" "${CACHE_DIR:?}" "${RUNNER_USER:?}" "${PRUNE_DAYS:?}" "${CONTAINER_HOURS:?}" "${BUILD_CACHE_MAX:?}" "${DISK_ALERT_PERCENT:?}"
 
 # A busy instance has a Runner.Worker process under its directory.
 busy() { pgrep -f "^$1/bin/Runner.Worker" >/dev/null; }
@@ -72,6 +73,6 @@ killall --older-than 1h --user "$RUNNER_USER" ssh-agent 2>/dev/null || true
 used=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 echo "root file system ${used}% used"
 if [ "$used" -gt "$DISK_ALERT_PERCENT" ]; then
-  echo "above ${DISK_ALERT_PERCENT}%: look at $ROOT/*/home (each instance's tool caches), $ROOT/*/_work and docker system df" >&2
+  echo "above ${DISK_ALERT_PERCENT}%: look at $CACHE_DIR (the shared caches), $ROOT/*/home (each instance's own), $ROOT/*/_work and docker system df" >&2
   exit 1
 fi

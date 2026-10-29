@@ -27,8 +27,15 @@ github_runner_checksum: sha256:baebf204307bac6193480852732f0aba2ae97b6c5597c244f
 
 github_runner_user: runner
 # One directory per instance under here, each with a home of its own
-# (<root>/<n>/home): tool caches are per instance, never shared between jobs.
+# (<root>/<n>/home): what a job writes into its home in place (mise's tool
+# installs and binary, registry logins in ~/.docker, ssh and git config) is
+# never shared between jobs running at the same time.
 github_runner_root: /opt/actions-runner
+# The caches that are built for many concurrent writers, shared by all
+# instances instead of held once per instance: the pnpm store
+# (content-addressed, files added by atomic rename), uv's cache, and
+# Playwright's browsers (installed under a lock).
+github_runner_cache_dir: /var/cache/github-runner
 # Extra labels on top of the ones every runner carries (self-hosted, linux, x64).
 github_runner_labels: []
 

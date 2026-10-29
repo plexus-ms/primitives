@@ -38,6 +38,15 @@
   loop_control:
     label: "{{ github_runner_root }}/{{ item.0 }}{{ item.1 }}"
 
+- name: Create the shared caches
+  ansible.builtin.file:
+    path: "{{ github_runner_cache_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    mode: "0755"
+  loop: ["", pnpm-store, uv, ms-playwright]
+
 - name: Download the runner
   ansible.builtin.get_url:
     url: https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz
@@ -143,6 +152,9 @@
       User={{ github_runner_user }}
       Environment=HOME={{ github_runner_root }}/%i/home
       Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/github-runner-job-completed
+      Environment=pnpm_config_store_dir={{ github_runner_cache_dir }}/pnpm-store
+      Environment=UV_CACHE_DIR={{ github_runner_cache_dir }}/uv
+      Environment=PLAYWRIGHT_BROWSERS_PATH={{ github_runner_cache_dir }}/ms-playwright
       WorkingDirectory={{ github_runner_root }}/%i
       ExecStart={{ github_runner_root }}/%i/bin/runsvc.sh
       KillMode=process
@@ -178,6 +190,7 @@
       [Service]
       Type=oneshot
       Environment=ROOT={{ github_runner_root }}
+      Environment=CACHE_DIR={{ github_runner_cache_dir }}
       Environment=RUNNER_USER={{ github_runner_user }}
       Environment=PRUNE_DAYS={{ github_runner_prune_days }}
       Environment=CONTAINER_HOURS={{ github_runner_container_hours }}
