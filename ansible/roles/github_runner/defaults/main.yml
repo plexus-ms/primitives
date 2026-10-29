@@ -36,6 +36,33 @@ github_runner_root: /opt/actions-runner
 # (content-addressed, files added by atomic rename), uv's cache, and
 # Playwright's browsers (installed under a lock).
 github_runner_cache_dir: /var/cache/github-runner
+# The system libraries Playwright's Chromium links against, which
+# GitHub-hosted runners carry and a Debian host does not: Playwright's own
+# list for debian13-x64 (nativeDeps in playwright-core). The browsers
+# themselves are fetched by the jobs into the shared cache; a host on another
+# release overrides this with that release's names.
+github_runner_browser_packages:
+  - libasound2t64
+  - libatk-bridge2.0-0t64
+  - libatk1.0-0t64
+  - libatspi2.0-0t64
+  - libcairo2
+  - libcups2t64
+  - libdbus-1-3
+  - libdrm2
+  - libgbm1
+  - libglib2.0-0t64
+  - libnspr4
+  - libnss3
+  - libpango-1.0-0
+  - libx11-6
+  - libxcb1
+  - libxcomposite1
+  - libxdamage1
+  - libxext6
+  - libxfixes3
+  - libxkbcommon0
+  - libxrandr2
 # Extra labels on top of the ones every runner carries (self-hosted, linux, x64).
 github_runner_labels: []
 

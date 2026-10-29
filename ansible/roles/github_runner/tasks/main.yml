@@ -15,6 +15,11 @@
       - psmisc # killall, for the housekeeping
     state: present
 
+- name: Install the libraries the jobs' browsers need
+  ansible.builtin.apt:
+    name: "{{ github_runner_browser_packages }}"
+    state: present
+
 # The docker group is root-equivalent; the host runs nothing else.
 - name: Create the runner user
   ansible.builtin.user:
