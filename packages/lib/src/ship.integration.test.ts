@@ -190,6 +190,10 @@ function fixture(name: string): void {
     join(web, 'template/package.json.jinja'),
     '{\n  "devDependencies": {\n    "@plexus-ms/config": "^0.0.1"\n  }\n}\n',
   );
+  put(
+    join(web, 'template/pnpm-workspace.yaml'),
+    'catalog:\n  typescript: ^6\ncatalogs:\n  plexus:\n    "@plexus-ms/config": 0.0.1\n',
+  );
   const app = up('preset-app-nextjs');
   put(join(app, 'copier.yml'), '_answers_file: .copier-answers.yml\n');
   put(
@@ -484,6 +488,11 @@ test('happy path: primitives first, the npm wait, the rest, then one pull reques
     'exact',
   );
   assert.match(read(join(up('preset-app-nextjs'), 'template/package.json.jinja')), /"@plexus-ms\/config": "0\.2\.0"/);
+  assert.match(
+    read(join(up('preset-repo-web'), 'template/pnpm-workspace.yaml')),
+    /"@plexus-ms\/config": 0\.2\.0$/m,
+    'the catalog entry',
+  );
   assert.match(read(join(up('preset-repo-web'), 'template/.github/workflows/ci.yml.jinja')), /changes\.yml@0\.2\.0/);
 
   // Propagation: the workspace checkouts stay as they are; the origins get a train branch and a pull request.
