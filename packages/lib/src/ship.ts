@@ -216,7 +216,8 @@ async function awaitPublished(ctx: Context, next: string, wait: PublishWait): Pr
   for (;;) {
     const still: string[] = [];
     for (const name of missing) {
-      const seen = (await ctx.read('npm', ['view', `${name}@${next}`, 'version']).catch(() => '')).trim();
+      // --prefer-online: npm otherwise answers from a packument it cached up to five minutes ago.
+      const seen = (await ctx.read('npm', ['view', `${name}@${next}`, 'version', '--prefer-online']).catch(() => '')).trim();
       if (seen !== next) still.push(name);
     }
     missing = still;
