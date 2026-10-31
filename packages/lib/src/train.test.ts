@@ -18,6 +18,7 @@ import {
 test('latestTag compares across both tag eras', () => {
   assert.equal(latestTag(['v0.21', '0.22.0', 'v0.9', '0.10.0']), '0.22.0');
   assert.equal(latestTag(['v0.21', 'v0.9']), 'v0.21');
+  assert.equal(latestTag(['0.76.0', '0.100.0-rc.3']), '0.76.0', 'a prerelease is not a train');
   assert.equal(latestTag([]), undefined);
   assert.equal(nextMinor('0.22.0'), '0.23.0');
 });

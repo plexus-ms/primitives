@@ -376,6 +376,11 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
     3,
     'copier ran at the version plx pins',
   );
+  assert.equal(
+    (out.match(/MISE_IGNORED_CONFIG_PATHS=\S+ mise exec copier@/g) ?? []).length,
+    3,
+    "copier ran with the clone's mise config ignored",
+  );
   assert.ok(
     runs.every((l) => !l.startsWith(`${WS}/`)),
     'copier ran outside the workspace (scratch clones)',

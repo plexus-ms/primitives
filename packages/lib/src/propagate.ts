@@ -54,6 +54,17 @@ export const isClean = (s: Summary): boolean =>
 const BASE_TAG = 'ship-base';
 const trainBranch = (train: string): string => `train/${train}`;
 
+/**
+ * copier at the version plx pins, through mise, with the clone's own mise
+ * config ignored: copier needs no project tool, and a root `mise.toml` left
+ * with conflict markers by the root site's update would otherwise fail every
+ * later mise call in the clone, the apps' updates first of all.
+ */
+const copierIn = (clone: string, args: string[]): [string, string[]] => [
+  'env',
+  [`MISE_IGNORED_CONFIG_PATHS=${clone}`, 'mise', ...copierVia(args)],
+];
+
 export async function propagate(ctx: Context, workspace: string, train: string): Promise<Summary> {
   const summary: Summary = {
     train,
@@ -153,9 +164,18 @@ async function updateSite(
       await previewCommit(ctx, clone, `plx preview: ${site.rel} reads ${localPreset} from the local checkout`);
       await ctx.stage(
         run(
-          'mise',
-          copierVia(['update', '--skip-answered', '--trust', '--defaults', '--skip-tasks', '--vcs-ref', 'main']),
-          { cwd: target },
+          ...copierIn(clone, [
+            'update',
+            '--skip-answered',
+            '--trust',
+            '--defaults',
+            '--skip-tasks',
+            '--vcs-ref',
+            'main',
+          ]),
+          {
+            cwd: target,
+          },
         ),
       );
     } else {
@@ -164,7 +184,7 @@ async function updateSite(
       // not a pull request. Unattended, a new question takes its default; on a
       // terminal copier asks.
       const args = ['update', '--skip-answered', '--trust', '--skip-tasks', ...(ctx.yes ? ['--defaults'] : [])];
-      await ctx.apply([run('mise', copierVia(args), { cwd: target, interactive: true })]);
+      await ctx.apply([run(...copierIn(clone, args), { cwd: target, interactive: true })]);
     }
   } catch (error) {
     ctx.say(`  ✗ FAILED — copier update exited nonzero${detail(error)}`);

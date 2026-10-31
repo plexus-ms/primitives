@@ -45,13 +45,14 @@ export function nextMinor(version: string): string {
 }
 
 /**
- * The newest tag of a repo across both eras (`v0.21` and `0.22.0`), compared
- * numerically on the v-stripped form: a plain version sort would rank every
- * v-tag above every plain tag.
+ * The newest train tag of a repo across both eras (`v0.21` and `0.22.0`),
+ * compared numerically on the v-stripped form: a plain version sort would rank
+ * every v-tag above every plain tag. A prerelease tag (`0.100.0-rc.1`, a
+ * publishing rehearsal) is not a train and never the latest.
  */
 export function latestTag(tags: string[]): string | undefined {
   return tags
-    .filter((t) => /^v?\d/.test(t))
+    .filter((t) => /^v?\d+(\.\d+){1,2}$/.test(t))
     .sort((a, b) => compareTrains(a.replace(/^v/, ''), b.replace(/^v/, '')))
     .at(-1);
 }
