@@ -8,14 +8,21 @@
 // Conventions: compendium/miscellaneous/cli-design.md.
 export {
   bumpCollectionPin,
+  bumpConfigPin,
   bumpGalaxyVersion,
+  bumpManifestVersion,
+  bumpPlxPin,
   bumpWorkflowRefs,
+  COLLECTION_SOURCE,
+  CONFIG_PIN,
   hasConflictMarkers,
   hasUnmergedEntries,
+  PLX_PIN,
   stampChanged,
   stampStandard,
   syncMarker,
   today,
+  WORKFLOW_REF,
 } from './bookkeeping.ts';
 export { CATALOG_DIRS, type Catalog, type Module, parseModule, readCatalog } from './catalog.ts';
 export {
@@ -75,14 +82,19 @@ export {
   scanPage,
 } from './requirements.ts';
 export { preflightSelf, SELF_PACKAGE } from './self.ts';
-export { type ShipOptions, type ShipResult, ship } from './ship.ts';
+export { type PublishWait, type ShipOptions, type ShipResult, ship } from './ship.ts';
 export {
   isTrainVersion,
   latestTag,
   nextMinor,
+  PHASES,
+  PRIMITIVES,
+  phasesOf,
+  preflightForge,
   preflightRelease,
   readTrain,
   resolveVersion,
+  TRAIN_PACKAGES,
   TRAIN_REPOS,
   type Train,
   type TrainRepo,

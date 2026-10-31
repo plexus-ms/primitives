@@ -6,14 +6,31 @@ import { join } from 'node:path';
 import type { Context } from './context.ts';
 import { compareTrains } from './doctor.ts';
 
+/** The repo whose tag publishes the train-versioned packages; it is released first. */
+export const PRIMITIVES = 'primitives';
+
 /** The repos stamped with the train tag, in release order. */
 export const TRAIN_REPOS = [
-  'platform',
-  'ci-cd',
+  PRIMITIVES,
   'preset-repo-web',
   'preset-app-nextjs',
   'preset-repo-platform',
   'compendium',
+] as const;
+
+/**
+ * The train is cut in two phases: `primitives` alone, whose release publishes
+ * the train-versioned packages, then every other repo once those packages are
+ * on npm, because the presets and the compendium pin them at the train number
+ * and their commit hooks install the pin.
+ */
+export const PHASES: readonly (readonly string[])[] = [[PRIMITIVES], TRAIN_REPOS.filter((r) => r !== PRIMITIVES)];
+
+/** The packages published at the train number from `primitives` (§ 1.6 PLX), by their directory there. */
+export const TRAIN_PACKAGES = [
+  { name: '@plexus-ms/cli', dir: 'packages/cli' },
+  { name: '@plexus-ms/lib', dir: 'packages/lib' },
+  { name: '@plexus-ms/config', dir: 'packages/config' },
 ] as const;
 
 /** The umbrella directory holding the train repos, relative to the workspace. */
@@ -85,6 +102,10 @@ export async function readTrain(ctx: Context, upstream: string): Promise<Train> 
   return { repos, last: latestTag([...all]), skew: latest.some((l) => l !== latest[0]) };
 }
 
+/** The train's repos in release order, grouped by phase. */
+export const phasesOf = (train: Train): TrainRepo[][] =>
+  PHASES.map((names) => train.repos.filter((r) => names.includes(r.name)));
+
 /** Every train repo on main, clean, and not behind origin; throws naming the first offender. */
 export async function preflightRelease(ctx: Context, train: Train): Promise<void> {
   for (const { name, path } of train.repos) {
@@ -97,6 +118,18 @@ export async function preflightRelease(ctx: Context, train: Train): Promise<void
       throw new Error(
         `${name} is ${behind} commit(s) behind origin/main — pull first, or the tag lands on a stale commit`,
       );
+  }
+}
+
+/**
+ * The forge CLI is what creates the releases and the consumers' pull requests;
+ * an expired login is found here, before anything is written.
+ */
+export async function preflightForge(ctx: Context): Promise<void> {
+  try {
+    await ctx.read('gh', ['auth', 'status']);
+  } catch {
+    throw new Error('gh is not logged in (gh auth status failed) — run gh auth login first');
   }
 }
 
