@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  bumpCatalogPin,
   bumpCollectionPin,
   bumpConfigPin,
   bumpGalaxyVersion,
@@ -54,6 +55,11 @@ test('bumpConfigPin pins the config dependency exactly and leaves workspace refe
   assert.equal(bumpConfigPin(tpl, '0.100.0'), tpl.replace('"^0.3.1"', '"0.100.0"'));
   const ws = '"devDependencies": { "@plexus-ms/config": "workspace:*" }\n';
   assert.equal(bumpConfigPin(ws, '0.100.0'), ws);
+});
+
+test('bumpCatalogPin pins the config entry of the plexus catalog', () => {
+  const ws = 'catalog:\n  typescript: ^6\ncatalogs:\n  plexus:\n    "@plexus-ms/config": 0.100.0\n';
+  assert.equal(bumpCatalogPin(ws, '0.101.0'), ws.replace('0.100.0', '0.101.0'));
 });
 
 test('stampStandard and stampChanged edit the frontmatter only', () => {

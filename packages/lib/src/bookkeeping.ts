@@ -52,6 +52,14 @@ export const CONFIG_PIN = '@plexus-ms/config';
 export const bumpConfigPin = (text: string, train: string): string =>
   text.replace(/("@plexus-ms\/config":\s*")(?!workspace:|catalog:)[^"]*(")/g, `$1${train}$2`);
 
+/**
+ * The `@plexus-ms/config` entry of the `plexus` catalog in a workspace file
+ * (`catalogs.plexus` in `pnpm-workspace.yaml`): the one place a web repo pins
+ * the train-versioned config, every manifest saying `catalog:plexus`.
+ */
+export const bumpCatalogPin = (text: string, train: string): string =>
+  text.replace(/^(\s+"@plexus-ms\/config":\s*)\S+$/m, `$1${train}`);
+
 /** The map's frontmatter carries the train version and the date it was cut (§ 1.5 PLX). */
 export const stampStandard = (text: string, train: string, today: string): string =>
   setFrontmatterField(setFrontmatterField(text, 'version', train), 'timestamp', today);

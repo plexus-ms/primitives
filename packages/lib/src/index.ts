@@ -7,6 +7,7 @@
 // file shapes (marker.ts, copier.ts) live here, once, for every verb.
 // Conventions: compendium/miscellaneous/cli-design.md.
 export {
+  bumpCatalogPin,
   bumpCollectionPin,
   bumpConfigPin,
   bumpGalaxyVersion,
