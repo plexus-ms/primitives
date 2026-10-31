@@ -15,7 +15,7 @@ import { renderSummary } from './ship.ts';
 export function register(program: Command): void {
   program
     .command('propagate')
-    .description('copier-update every consumer of the presets to the current train, and pin their ci-cd workflow refs')
+    .description('copier-update every consumer of the presets to the current train, as one pull request per consumer')
     .argument('[dir]', 'the workspace: plexus-ms/ and the consumers sit under it', '.')
     .option('--train <version>', 'the train to propagate (default: the current one)')
     .action(async (dir: string, opts: { train?: string }, command: Command) => {
