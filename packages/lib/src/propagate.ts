@@ -216,8 +216,13 @@ async function updateSite(
     summary.clean.push(site.rel);
   }
   for (const line of status.split('\n').filter(Boolean)) ctx.say(`    ${line}`);
-  // Each preview site is committed so the next site's answers rewrite starts from a clean tree.
+  // Each preview site is committed so the next site's answers rewrite starts
+  // from a clean tree. The real run stages instead: a conflict leaves unmerged
+  // index entries, and copier's own git plumbing (`git write-tree`) refuses an
+  // index with those, so the next site's update would fail; staged, the
+  // markers are in the tree and the index is whole.
   if (ctx.dryRun) await previewCommit(ctx, clone, `plx preview: ${site.rel} updated`);
+  else await ctx.stage(run('git', ['add', '-A'], { cwd: clone }));
 }
 
 /** The marker's `plexus` follows the answers file's `_commit` after an update (bookkeeping.ts). */

@@ -706,6 +706,21 @@ test('a conflict is committed with its markers and the pull request says so', as
   assert.equal(result?.pulls.length, 2, 'the pull request is opened all the same');
 });
 
+test('a conflict at the repo root does not stop its apps', async () => {
+  fixture('rootconflict');
+  process.env.FAKE_COPIER_CONFLICT = 'acme/web';
+  const { result, out } = await run({ yes: true });
+  delete process.env.FAKE_COPIER_CONFLICT;
+  assert.deepEqual(result?.conflicted, ['acme/web', 'acme/web/apps/site'], out);
+  assert.deepEqual(result?.failed, []);
+  assert.match(
+    onTrain('acme-web', '0.2.0', 'apps/site/template-owned.txt'),
+    /^<<<<<<< /m,
+    'the app was updated after the root conflicted',
+  );
+  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..train/0.2.0'), '1', 'still one commit');
+});
+
 test('propagate-only validates the version and bumps to the current train', async () => {
   fixture('prop');
   const bad = await run({ yes: true }, { propagateOnly: true, train: '1.2' });
