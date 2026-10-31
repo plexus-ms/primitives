@@ -1,0 +1,41 @@
+{
+  "name": "@plexus-ms/cli",
+  "version": "0.10.0",
+  "description": "plx, the Plexus command-line tool: a single-script adapter over @plexus-ms/lib",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "plx": "./dist/plx.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plexus-ms/packages.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24.22.1"
+  },
+  "scripts": {
+    "build": "node build.js",
+    "check": "tsc --noEmit",
+    "test": "node --test",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.7.4",
+    "@plexus-ms/lib": "workspace:*",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "typescript": "catalog:"
+  }
+}

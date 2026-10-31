@@ -1,0 +1,25 @@
+{
+  "name": "@plexus-ms/config",
+  "version": "0.3.1",
+  "description": "Shared, extendable tool configurations",
+  "license": "GPL-3.0-or-later",
+  "files": [
+    "biome.json",
+    "tsconfig-cli.json",
+    "tsconfig-next.json"
+  ],
+  "exports": {
+    "./biome": "./biome.json",
+    "./tsconfig-cli": "./tsconfig-cli.json",
+    "./tsconfig-next": "./tsconfig-next.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plexus-ms/packages.git",
+    "directory": "packages/config"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  }
+}
