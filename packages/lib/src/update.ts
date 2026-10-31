@@ -9,9 +9,9 @@
 // edits stay as they are, and in CI the worktree shares the checkout's
 // credentials, so the push and the pull request need no second token. Then
 // `takeTrain` (propagate.ts): copier update at every site, marker, lockfile,
-// workflow refs, one commit on `train/<version>`, one pull request.
+// workflow refs, one commit on `plexus/<version>`, one pull request.
 //
-// The train is pulled once per repo: a `train/<version>` branch already on
+// The train is pulled once per repo: a `plexus/<version>` branch already on
 // origin, from an earlier run, from `plx ship`, or from a human resolving its
 // conflicts, is left alone, so a daily run never moves a branch somebody is
 // working on; deleting the branch is how a pull is redone. A repo whose every

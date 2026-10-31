@@ -4,7 +4,7 @@ name: _update
 # `plx update` asks the forge for the preset's newest release, runs copier
 # update at every site in a worktree of the branch the train lands on, syncs
 # the marker, refreshes the lockfile, moves the workflow refs, and opens the
-# pull request on `train/<version>`, the same one `plx ship` opens from the
+# pull request on `plexus/<version>`, the same one `plx ship` opens from the
 # maintainers' workspace; whichever arrives first opens it, the other finds
 # the branch and leaves it. A branch already on origin is never moved, so a
 # scheduled run cannot overwrite a conflict somebody is resolving. The caller

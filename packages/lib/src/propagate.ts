@@ -6,7 +6,7 @@
 // version plx pins (copier.ts) at every site (the repo root, then its apps/*),
 // the marker is synced to the answers file, the lockfile refreshed where
 // manifests moved, the hand-owned workflows pinned to the train; then one
-// commit, pushed as `train/<version>`, and a pull request against the branch.
+// commit, pushed as `plexus/<version>`, and a pull request against the branch.
 // A conflict is committed with its markers and reported, and the pull request
 // is opened all the same: that is where it gets resolved. Propagation never
 // aborts the run: a failing or conflicting consumer is recorded and the rest
@@ -64,7 +64,7 @@ export const emptySummary = (train: string, preview: boolean): Summary => ({
   pulls: [],
 });
 
-export const trainBranch = (train: string): string => `train/${train}`;
+export const trainBranch = (train: string): string => `plexus/${train}`;
 
 /** How a consumer takes the train: the knobs propagate and update set differently. */
 export interface Take {

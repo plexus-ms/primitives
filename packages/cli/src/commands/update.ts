@@ -1,6 +1,6 @@
 // plx update [dir]: this repo takes the train (§ 3 PLX-Updates), as the same
 // pull request `ship` opens from the maintainers' workspace: copier update at
-// every site, the marker, the lockfile, the workflow refs, on `train/<version>`.
+// every site, the marker, the lockfile, the workflow refs, on `plexus/<version>`.
 // Mounted by the presets' update.yml on a schedule in the tenant's own CI, and
 // run by hand from a checkout otherwise; the checkout itself is never touched.
 //
@@ -17,7 +17,7 @@ export function register(program: Command): void {
   program
     .command('update')
     .description(
-      'bring this repo up to a train, as a pull request on train/<version>: copier update at every site, the marker, the lockfile, the workflow refs',
+      'bring this repo up to a train, as a pull request on plexus/<version>: copier update at every site, the marker, the lockfile, the workflow refs',
     )
     .argument('[dir]', 'a repo generated from the presets', '.')
     .option('--train <version>', "the train to take (default: the preset's newest release)")

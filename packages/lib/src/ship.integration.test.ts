@@ -368,8 +368,8 @@ const noneTagged = (v: string) => TRAIN_REPOS.every((r) => !tagged(r, v));
 const has = (text: string, needle: string | RegExp) =>
   typeof needle === 'string' ? text.includes(needle) : needle.test(text);
 /** A file as the consumer's origin has it on the train branch. */
-const onTrain = (r: string, v: string, file: string) => git(remote(r), 'show', `train/${v}:${file}`);
-const pull = (r: string, v: string, suffix = '') => read(join(FORGE(), r, `pr-train-${v}${suffix}`)).trim();
+const onTrain = (r: string, v: string, file: string) => git(remote(r), 'show', `plexus/${v}:${file}`);
+const pull = (r: string, v: string, suffix = '') => read(join(FORGE(), r, `pr-plexus-${v}${suffix}`)).trim();
 const consumersUntouched = () => {
   for (const r of ['acme/web', 'acme/platform']) {
     assert.equal(git(join(WS, r), 'status', '--porcelain'), '', `${r} checkout clean`);
@@ -438,8 +438,8 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
   );
   assert.ok(has(out, 'marker: plexus → next in acme/web/PLEXUS.md'), 'preview announces the marker sync');
   assert.ok(has(out, 'acme/platform: apps.yml workflow refs → @0.2.0'), 'preview lists the ref bumps');
-  assert.ok(has(out, '(preview) acme/web: would commit, push train/0.2.0 and open a pull request against develop'));
-  assert.ok(has(out, '(preview) acme/platform: would commit, push train/0.2.0 and open a pull request against main'));
+  assert.ok(has(out, '(preview) acme/web: would commit, push plexus/0.2.0 and open a pull request against develop'));
+  assert.ok(has(out, '(preview) acme/platform: would commit, push plexus/0.2.0 and open a pull request against main'));
   assert.ok(!fakeLog().some((l) => has(l, 'pr create')), 'no pull request opened');
   assert.deepEqual(result, {
     train: '0.2.0',
@@ -559,8 +559,12 @@ test('happy path: primitives first, the npm wait, the rest, then one pull reques
   assert.match(ci, /changes\.yml@0\.2\.0/);
   assert.match(ci, /pipeline\.yml@0\.2\.0/);
   assert.match(onTrain('acme-platform', '0.2.0', '.github/workflows/apps.yml'), /deploy\.yml@0\.2\.0/);
-  assert.equal(git(remote('acme-web'), 'log', '-1', '--format=%s', 'train/0.2.0'), 'chore: train 0.2.0');
-  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..train/0.2.0'), '1', 'one commit on the branch');
+  assert.equal(git(remote('acme-web'), 'log', '-1', '--format=%s', 'plexus/0.2.0'), 'chore: train 0.2.0');
+  assert.equal(
+    git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'),
+    '1',
+    'one commit on the branch',
+  );
   assert.equal(
     git(remote('acme-web'), 'rev-parse', 'develop'),
     git(join(WS, 'acme/web'), 'rev-parse', 'develop'),
@@ -587,7 +591,7 @@ test('a re-run of the propagation moves the train branch and reuses its pull req
   assert.equal(fakeLog().filter((l) => has(l, 'pr create')).length, 2, 'two consumers, two pull requests in all');
   assert.ok(has(second.out, 'acme/web: pull request updated: https://forge/acme-web/pull/1'));
   assert.equal(
-    git(remote('acme-web'), 'rev-list', '--count', 'develop..train/0.2.0'),
+    git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'),
     '1',
     'branch replaced, not stacked',
   );
@@ -761,7 +765,7 @@ test('a conflict at the repo root does not stop its apps', async () => {
     /^<<<<<<< /m,
     'the app was updated after the root conflicted',
   );
-  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..train/0.2.0'), '1', 'still one commit');
+  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'), '1', 'still one commit');
 });
 
 test('propagate-only validates the version and bumps to the current train', async () => {
@@ -816,7 +820,7 @@ test('update: a repo takes the newest train itself, in a worktree, and leaves it
   assert.match(onTrain('acme-web', '0.2.0', 'apps/site/template-owned.txt'), /updated from 0\.2\.0/);
   assert.match(onTrain('acme-web', '0.2.0', 'PLEXUS.md'), /^plexus: next$/m, 'marker synced');
   assert.match(onTrain('acme-web', '0.2.0', '.github/workflows/ci.yml'), /pipeline\.yml@0\.2\.0/, 'refs bumped');
-  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..train/0.2.0'), '1', 'one commit');
+  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'), '1', 'one commit');
   assert.equal(pull('acme-web', '0.2.0', '.base'), 'develop');
   assert.match(pull('acme-web', '0.2.0', '.body'), /Opened by `plx update`/);
   assert.equal(git(web, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature/x', 'checkout still on its branch');
@@ -836,7 +840,7 @@ test('update: a repo takes the newest train itself, in a worktree, and leaves it
   // The next day: the branch is on origin, so nothing moves it.
   const again = await runUpdate({ yes: true }, { repo: web });
   assert.equal(again.error, undefined, again.out);
-  assert.ok(has(again.out, 'web: train/0.2.0 is already on origin (https://forge/acme-web/pull/1) — nothing to do'));
+  assert.ok(has(again.out, 'web: plexus/0.2.0 is already on origin (https://forge/acme-web/pull/1) — nothing to do'));
   assert.equal(copierRuns().length, 2, 'copier not run again');
   assert.deepEqual(again.result?.pulls, ['https://forge/acme-web/pull/1']);
   assert.deepEqual(again.result?.clean, []);
@@ -870,7 +874,7 @@ test('update: the dry run previews in the worktree and pushes nothing', async ()
   assert.equal(error, undefined, out);
   assert.equal(copierRuns().filter((l) => has(l, '--vcs-ref 0.2.0')).length, 2, 'copier previewed both sites');
   assert.ok(has(out, 'M template-owned.txt'), 'preview shows the change');
-  assert.ok(has(out, '(preview) web: would commit, push train/0.2.0 and open a pull request against develop'));
+  assert.ok(has(out, '(preview) web: would commit, push plexus/0.2.0 and open a pull request against develop'));
   assert.throws(() => onTrain('acme-web', '0.2.0', 'template-owned.txt'), 'nothing pushed');
   assert.ok(!fakeLog().some((l) => has(l, 'pr create')), 'no pull request');
   assert.equal(git(web, 'status', '--porcelain'), '', 'checkout clean');
@@ -886,7 +890,7 @@ test("update: after ship opened the train's pull request, the tenant's own run f
   const before = copierRuns().length;
   const { result, error, out } = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
   assert.equal(error, undefined, out);
-  assert.ok(has(out, 'platform: train/0.2.0 is already on origin (https://forge/acme-platform/pull/1)'));
+  assert.ok(has(out, 'platform: plexus/0.2.0 is already on origin (https://forge/acme-platform/pull/1)'));
   assert.equal(copierRuns().length, before);
   assert.deepEqual(result?.pulls, ['https://forge/acme-platform/pull/1']);
   assert.deepEqual(result?.failed, []);
