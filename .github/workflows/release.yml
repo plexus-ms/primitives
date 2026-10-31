@@ -35,9 +35,14 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           case "$TAG" in *-*) dist_tag=next ;; *) dist_tag=latest ;; esac
+          # The versions first, all three, so that the workspace references
+          # between them resolve to the tag; `npm pkg set` edits the manifest
+          # and nothing else, where `npm version` would refuse the dirty tree.
+          for dir in packages/lib packages/config packages/cli; do
+            (cd "$dir" && npm pkg set version="$TAG")
+          done
           for dir in packages/lib packages/config packages/cli; do
             name=$(node -p "require('./$dir/package.json').name")
-            (cd "$dir" && pnpm version "$TAG" --no-git-tag-version --allow-same-version >/dev/null)
             if [ "$(npm view "$name@$TAG" version 2>/dev/null)" = "$TAG" ]; then
               echo "$name@$TAG is on npm already"
               continue
