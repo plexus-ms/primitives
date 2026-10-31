@@ -84,7 +84,7 @@ sed -i.bak 's/^_commit: .*/_commit: next/' .copier-answers.yml && rm -f .copier-
 // as the fake copier above; anything else it only logs.
 script(
   'mise',
-  `echo "mise $*" >> "$FAKE_LOG"
+  `echo "mise $* ignored=\${MISE_IGNORED_CONFIG_PATHS:-}" >> "$FAKE_LOG"
 if [ "$1" = exec ] && [[ "$2" == copier@* ]] && [ "$3" = -- ]; then shift 3; exec "$@"; fi
 `,
 );
@@ -377,7 +377,8 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
     'copier ran at the version plx pins',
   );
   assert.equal(
-    (out.match(/MISE_IGNORED_CONFIG_PATHS=\S+ mise exec copier@/g) ?? []).length,
+    fakeLog().filter((l) => l.startsWith('mise exec copier@') && / ignored=\/\S+\/acme\/(web|platform)$/.test(l))
+      .length,
     3,
     "copier ran with the clone's mise config ignored",
   );
@@ -497,6 +498,12 @@ test('happy path: primitives first, the npm wait, the rest, then one pull reques
     'no ref override against the published source; tasks skipped',
   );
   assert.equal(copierRuns().filter((l) => has(l, '--defaults')).length, 3, 'unattended run lets copier take defaults');
+  assert.equal(
+    fakeLog().filter((l) => l.startsWith('mise exec copier@') && / ignored=\/\S+\/acme\/(web|platform)$/.test(l))
+      .length,
+    3,
+    "copier ran with the clone's mise config ignored",
+  );
   for (const [r, f] of [
     ['acme-web', 'template-owned.txt'],
     ['acme-web', 'apps/site/template-owned.txt'],
