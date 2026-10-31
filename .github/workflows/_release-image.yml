@@ -1,0 +1,105 @@
+name: _release-image
+
+# The image shape of the release verb (§ 4 PLX-Delivery): from verified code,
+# build an app's image hermetically from its Dockerfile and push it to the
+# caller's GHCR organisation, tagged with the git SHA. The caller runs this
+# after _verify.yml in the same run; the verb does not re-verify.
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: Required. Workspace app name (the dir under `apps/`, e.g. `website`).
+        required: true
+        type: string
+      image-name:
+        description: Image name under the caller's GHCR org. Defaults to the value of `app`.
+        required: false
+        type: string
+        default: ''
+      dockerfile:
+        description: Dockerfile path. Defaults to apps/<app>/docker/Dockerfile.
+        required: false
+        type: string
+        default: ''
+      build-args:
+        description: >-
+          Extra docker build-args, one KEY=value per line. Appended after the
+          standard APP/NODE_VERSION args (e.g. SOURCE_COMMIT=<git sha>
+          for a /health commit check).
+        required: false
+        type: string
+        default: ''
+      runner:
+        description: >-
+          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
+          runner the tenant owns (GitHub bills minutes only on its own runners).
+        required: false
+        type: string
+        default: ubuntu-latest
+      persistent:
+        description: >-
+          The runner keeps its disk between jobs (a runner the tenant owns):
+          caches then stay on the machine instead of round-tripping through
+          GitHub (§ 4 PLX-Delivery).
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      image-ref:
+        description: Full image ref that was released (name:sha).
+        value: ${{ jobs.release.outputs.image-ref }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      image-ref: ${{ steps.meta.outputs.image-ref }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: echo "NODE_VERSION=$(cat .node-version)" >> "$GITHUB_ENV"
+      - id: meta
+        name: Resolve the image reference
+        # Image lives under the CALLER's org so the repo's own GITHUB_TOKEN can
+        # push it (no cross-org PAT). Tenant app → tenant-org registry.
+        run: |
+          name='${{ inputs.image-name }}'
+          [ -n "$name" ] || name='${{ inputs.app }}'
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "image-ref=ghcr.io/$owner/$name:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      # A buildx builder container is the only builder that can export its
+      # cache to GitHub (type=gha), which a runner that dies after the job
+      # needs. On a persistent runner the daemon's own BuildKit builds instead,
+      # and its cache stays on disk between jobs.
+      - uses: docker/setup-buildx-action@v4
+        if: ${{ !inputs.persistent }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ inputs.dockerfile != '' && inputs.dockerfile || format('apps/{0}/docker/Dockerfile', inputs.app) }}
+          push: true
+          tags: ${{ steps.meta.outputs.image-ref }}
+          build-args: |
+            APP=${{ inputs.app }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            ${{ inputs.build-args }}
+          cache-from: ${{ !inputs.persistent && 'type=gha' || '' }}
+          cache-to: ${{ !inputs.persistent && 'type=gha,mode=max' || '' }}
+      # The daemon's builder keeps the image it built next to pushing it. On a
+      # persistent runner one image per app and commit would pile up, and
+      # nothing on the runner needs it: the deploy pulls it on the app host.
+      # The build cache holds the layers, so the next build loses nothing.
+      - name: Remove the local image
+        if: ${{ always() && inputs.persistent }}
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image-ref }}
+        run: docker image rm "$IMAGE_REF" 2>/dev/null || true

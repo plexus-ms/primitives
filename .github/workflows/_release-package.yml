@@ -1,0 +1,70 @@
+name: _release-package
+
+# The package shape of the release verb (§ 5 PLX-Delivery): from verified
+# code on the trunk, version and publish with changesets. On a push with
+# pending changesets it opens or updates the "version packages" PR; on the
+# push that merges that PR it publishes, token-less through OIDC trusted
+# publishing, with provenance. The caller runs this after _verify.yml in the
+# same run; the verb does not re-verify.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
+          runner the tenant owns (GitHub bills minutes only on its own runners).
+        required: false
+        type: string
+        default: ubuntu-latest
+      persistent:
+        description: >-
+          The runner keeps its disk between jobs (a runner the tenant owns):
+          caches then stay on the machine instead of round-tripping through
+          GitHub (§ 4 PLX-Delivery).
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write       # push the version PR and the tags
+  pull-requests: write  # open the "version packages" PR
+  id-token: write       # npm build provenance
+
+jobs:
+  release:
+    runs-on: ${{ inputs.runner }}
+    concurrency: release
+    # mise install runs the postinstall hook, which points core.hooksPath at
+    # hk, so hk's hooks would fire on anything changesets/action commits or
+    # pushes through the git CLI. Wrong in both directions: pre-push cannot
+    # resolve the tag objects `changeset publish` creates, and re-running
+    # verify here only repeats what the verify job already ran.
+    env:
+      HK_SKIP_HOOK: pre-commit,pre-push
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          cache: ${{ !inputs.persistent }}
+      - run: pnpm install --frozen-lockfile
+      # Build every package in dependency order before publishing: `changeset
+      # publish` runs the packages' `prepack` hooks alphabetically, so a
+      # package compiled against a workspace sibling's types would otherwise
+      # find no dist to resolve them from.
+      - run: pnpm exec turbo run build
+      # v2 is the one that understands @changesets/cli 3: v1 found the published
+      # packages by parsing the `New tag:` lines the 2.x CLI printed, which 3.x
+      # no longer does, so 3.x publishes reached npm with no tag and no GitHub
+      # release. v2 reads the CLI's structured output, pushes a tag per
+      # published package and creates its release (both on by default), through
+      # the GitHub API, so the version commit and the tags are signed. The
+      # action publishes no moving `v2` tag, so the pin is exact and the update
+      # bot carries it; our scripts call the CLI directly, so the
+      # CHANGESETS_OUTPUT the action hands them reaches it unchanged.
+      - uses: changesets/action@v2.1.2
+        with:
+          version-script: pnpm exec changeset version
+          publish-script: pnpm exec changeset publish
+          commit-message: "chore: version packages"
+          pr-title: "Version Packages"

@@ -1,0 +1,87 @@
+name: _deploy
+
+# Mounts the deploy verb (§ 6 PLX-Delivery): launch a released artifact into
+# an execution environment. Logic lives in `plx deploy` (@plexus-ms/cli,
+# pinned in the caller's mise.toml), never here; the caller supplies the host
+# and the SSH key. The caller is the app's SOURCE
+# repo, because the verb reads apps/<app>/docker/compose.yaml from the checkout
+# and renders it onto the host with the image ref pinned: an app repo's
+# _pipeline.yml after the release, or the platform repo's deploy.yml for a
+# third-party app, whose compose.yaml pins its own image (no image-ref).
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
+          runner the tenant owns (GitHub bills minutes only on its own runners).
+        required: false
+        type: string
+        default: ubuntu-latest
+      tenant:
+        description: Tenant id — first segment of the app dir (/opt/stacks/<tenant>/<app>).
+        required: true
+        type: string
+      app:
+        required: true
+        type: string
+      image-ref:
+        description: >-
+          Full image ref to deploy (name:tag), the release's output. Empty for
+          a third-party app whose compose.yaml pins its own image.
+        required: false
+        type: string
+        default: ''
+      host:
+        description: SSH target, e.g. deploy@1.2.3.4.
+        required: true
+        type: string
+      health-url:
+        description: >-
+          Healthcheck URL polled on the host. Defaults to the app's readiness
+          path (/healthz, or its plexus.healthz label) on its loopback port
+          (PLEXUS_LOOPBACK_PORT in the app dir's .env).
+        required: false
+        type: string
+        default: ''
+    secrets:
+      ssh-key:
+        description: Private key authorized as the deploy user on the host.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ${{ inputs.runner }}
+    # Serialize deploys per app+host: at most one running and one pending run
+    # per group, and GitHub replaces the pending run with the newest — so the
+    # newest commit always deploys last. Never cancels a mid-flight deploy
+    # (cancelling between migrate and up would strand the host).
+    concurrency:
+      group: deploy-${{ inputs.tenant }}-${{ inputs.app }}-${{ inputs.host }}
+      cancel-in-progress: false
+    steps:
+      # The caller's repo (the app's source repo) — cwd for the verb, which
+      # reads apps/<app>/ relative here. Same SHA the image was built from.
+      - uses: actions/checkout@v7
+      # The caller's tools, plx among them.
+      - uses: jdx/mise-action@v5
+      - name: Load SSH key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          printf '%s\n' "${{ secrets.ssh-key }}" | ssh-add -
+      # An empty option value is the same as an absent one to the verb, so
+      # both flags are always passed.
+      - name: Deploy
+        run: plx deploy '${{ inputs.host }}' '${{ inputs.tenant }}' '${{ inputs.app }}' --image '${{ inputs.image-ref }}' --health-url '${{ inputs.health-url }}'
+      # A GitHub-hosted runner dies with the agent; a persistent one would keep
+      # it running, deploy key loaded, for every later job on the machine.
+      - name: Stop the SSH agent
+        if: ${{ always() }}
+        run: '[ -z "${SSH_AGENT_PID:-}" ] || ssh-agent -k'

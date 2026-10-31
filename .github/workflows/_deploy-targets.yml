@@ -1,0 +1,35 @@
+name: _deploy-targets
+
+# Mounts the deploy-targets verb (§ 3 PLX-Platform) on a platform repo and
+# emits {app: target} for the caller to index per matrix leg. Logic lives in
+# `plx deploy-targets` (@plexus-ms/cli, pinned in the caller's mise.toml),
+# never here.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
+          runner the tenant owns (GitHub bills minutes only on its own runners).
+        required: false
+        type: string
+        default: ubuntu-latest
+    outputs:
+      map:
+        description: JSON object of app name → deploy target, for the apps whose inventory file names one.
+        value: ${{ jobs.deploy-targets.outputs.map }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-targets:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      map: ${{ steps.run.outputs.map }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - id: run
+        run: echo "map=$(plx deploy-targets inventory)" >> "$GITHUB_OUTPUT"

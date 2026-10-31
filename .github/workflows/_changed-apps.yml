@@ -1,0 +1,52 @@
+name: _changed-apps
+
+# Mounts the changed-apps verb (§ 3 PLX-Delivery) on a push and emits the
+# changed app set as a JSON array for the caller's matrix. Logic lives in
+# `plx changed-apps` (@plexus-ms/cli, pinned in the caller's mise.toml), never
+# here: this file plumbs event refs in and JSON out.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
+          runner the tenant owns (GitHub bills minutes only on its own runners).
+        required: false
+        type: string
+        default: ubuntu-latest
+    outputs:
+      apps:
+        description: JSON array of changed app dir names (e.g. ["website"], or []).
+        value: ${{ jobs.changed-apps.outputs.apps }}
+
+permissions:
+  contents: read
+
+jobs:
+  changed-apps:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      apps: ${{ steps.run.outputs.apps }}
+    steps:
+      # The caller's repo (the tenant) — cwd for the verb, which reads apps/* +
+      # git relative here. Full history so github.event.before is reachable.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # The caller's tools, plx among them (and pnpm, which the verb asks for the workspace graph).
+      - uses: jdx/mise-action@v5
+      - id: refs
+        # PRs diff against the merge base; pushes against the previous tip.
+        run: |
+          if [ '${{ github.event_name }}' = 'pull_request' ]; then
+            echo "from=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "from=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          fi
+      - id: run
+        # The verb's JSON is the array ([] when empty) for fromJSON in the
+        # caller's matrix; jq compacts it onto the one line an output takes.
+        run: |
+          apps=$(plx --json changed-apps '${{ steps.refs.outputs.from }}' '${{ github.sha }}' | jq -c .)
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
