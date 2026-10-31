@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>plexus-ms/primitives//renovate/default"],
+  "reviewers": ["davidjalbers"],
+  "customManagers": [
+    {
+      "description": "A version pinned in a package's source, marked by a `// renovate:` line above it: the copier plx runs.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^packages/[^/]+/src/.+\\.ts$/"],
+      "matchStrings": [
+        "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\nexport const \\w+ = '(?<currentValue>[^']+)'"
+      ]
+    }
+  ]
+}

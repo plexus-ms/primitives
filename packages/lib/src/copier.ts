@@ -10,8 +10,7 @@ export const TEMPLATE_FILES = ['copier.yml', 'copier.yaml'];
 // The copier every propagation runs, pinned here so that it travels with plx:
 // a consumer's update never depends on whichever copier the operator's machine
 // has on its PATH. mise installs it on first use. The update bot moves the pin
-// (the regex manager in renovate.json), and `plx changeset` writes the patch it
-// owes, because it changes shipped source.
+// (the regex manager in renovate.json); the next train ships it.
 // renovate: datasource=pypi depName=copier
 export const COPIER_VERSION = '9.19.1';
 

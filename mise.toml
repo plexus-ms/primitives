@@ -1,0 +1,95 @@
+# primitives ships the methodology's primitives (§ 1.6 PLX): the plexus.platform
+# collection and the Terraform modules, the reusable workflows, the
+# train-versioned packages @plexus-ms/{cli,lib,config}, and the shared Renovate
+# preset. Two toolchains live here, owned in PLEXUS.md: the JS/TS one of PLX-JS
+# (node from .node-version, everything else a devDependency) and the ops one
+# (ansible and ansible-lint for the roles, actionlint for the workflows). The
+# contract verbs compose both; the ops side is checked mechanically, never on
+# the honor system, because the roles run as root on every tenant's hosts.
+monorepo_root = true
+
+[monorepo]
+config_roots = ["packages/*"]
+
+[tools]
+hk = "latest" # Git hooks
+uv = "latest" # required for ansible
+ansible = { version = "latest", uvx = true } # syntax check of the roles
+"pipx:ansible-lint" = { version = "latest", uvx = true } # the roles' static check
+actionlint = "1.7.12" # the workflows' static check: expressions, inputs and outputs, shellcheck over run blocks
+shellcheck = "0.11.0" # what actionlint runs over the workflows' run blocks
+
+[settings]
+# Install node from .node-version
+idiomatic_version_file_enable_tools = ["node"]
+
+[hooks]
+# Wire up Git hooks and get pnpm from packageManager
+postinstall = "hk install --mise && npx corepack enable"
+
+[env]
+# Command lines will be "turbo build" instead of "pnpm exec turbo build". The
+# workspace build of the cli is on this path too (`pnpm plx`), built on install;
+# under a workspace that pins plx itself, that pin's shim comes first.
+_.path = ["{{config_root}}/node_modules/.bin"]
+
+
+# Contract verbs (§ 3 PLX-Repo)
+
+[tasks.dev]
+description = "No-op: nothing to start; the roles are applied by tenant playbooks, the workflows run on the forge"
+run = 'echo "dev: nothing to start in primitives"'
+
+[tasks.build]
+depends = ["install"]
+description = "Build the packages (the collection and the workflows ship as source)"
+run = "turbo run build"
+
+[tasks.verify]
+depends = ["lint", "check", "test"]
+description = "Perform all steps that verify code quality"
+
+# Internal / hidden tasks
+
+[tasks.install]
+description = "Install and wire up project dependencies"
+hide = true
+run = "pnpm install"
+sources = ["package.json", "packages/*/package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]
+outputs = ["node_modules/.pnpm/lock.yaml"]
+
+[tasks.lint]
+depends = ["install"]
+description = "Lint and format the codebase"
+usage = '''
+flag "--write" help="Apply safe fixes and formatting in place"
+arg "<paths>" var=#true default="." help="Files or directories to lint (defaults to the whole repo)"
+'''
+run = "biome check ${usage_write:+--write} --no-errors-on-unmatched $usage_paths"
+
+[tasks.check]
+depends = ["check-js", "check-ops"]
+description = "Run static checks on the codebase: the packages, the workflows, the collection"
+
+[tasks.check-js]
+depends = ["install"]
+description = "Type-check the packages"
+hide = true
+usage = 'arg "[package]" help="Package to check (defaults to all)"'
+run = 'turbo run check ${usage_package:+--filter=$usage_package}'
+
+[tasks.check-ops]
+description = "actionlint over the workflows; ansible-lint over the collection and a syntax check of a playbook that lists every role"
+hide = true
+run = [
+    'actionlint',
+    'ansible-lint ansible',
+    'ANSIBLE_ROLES_PATH=ansible/roles ansible-playbook --syntax-check -i localhost, tests/all-roles.yml',
+    './tests/all-roles-listed.sh',
+]
+
+[tasks.test]
+depends = ["install"]
+description = "Run tests on the packages (the roles are exercised by the dogfood tenant's playbook runs, the mounts by its pipelines)"
+usage = 'arg "[package]" help="Package to test (defaults to all)"'
+run = 'turbo run test ${usage_package:+--filter=$usage_package}'

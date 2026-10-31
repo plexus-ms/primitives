@@ -1,0 +1,46 @@
+name: release
+
+# Publishes the train-versioned packages (§ 1.6 PLX) when `plx ship` creates
+# the train's GitHub release: a release, not a tag push, so that what is
+# published always comes from a tag an immutable release has locked. The
+# packages take their version from the release's tag, which is what the
+# bookkeeping commit under it wrote into their manifests; a prerelease tag
+# (`0.100.0-rc.1`) publishes under the `next` dist-tag, which is how OIDC and
+# this workflow are rehearsed without spending a train number. A version that
+# is on npm already is skipped, so a re-run is a no-op. Token-less through
+# OIDC trusted publishing, with provenance.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    concurrency: release
+    env:
+      # mise install points core.hooksPath at hk; nothing here commits, but no hook should run either.
+      HK_SKIP_HOOK: pre-commit,pre-push
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec turbo run build
+      - name: publish what is not on npm yet
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          case "$TAG" in *-*) dist_tag=next ;; *) dist_tag=latest ;; esac
+          for dir in packages/lib packages/config packages/cli; do
+            name=$(node -p "require('./$dir/package.json').name")
+            (cd "$dir" && pnpm version "$TAG" --no-git-tag-version --allow-same-version >/dev/null)
+            if [ "$(npm view "$name@$TAG" version 2>/dev/null)" = "$TAG" ]; then
+              echo "$name@$TAG is on npm already"
+              continue
+            fi
+            (cd "$dir" && pnpm publish --provenance --access public --no-git-checks --tag "$dist_tag")
+          done

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "The shared Plexus update-bot preset (§ 2 PLX-Updates); every Plexus repo extends it with one line.",
+    "Unattended merging is stratified by blast radius: packages merge on green CI, everything that runs as root or inside CI waits for a human.",
+    "One writer per pin (§ 1 PLX-Updates): the release train writes the plexus-ms/primitives workflow refs and collection pin, the plx pin in mise.toml and the exact @plexus-ms/config pin, so the bot leaves them alone; it proposes everything else.",
+    "A third-party release waits three days before it is proposed, long enough for a compromised version to be pulled; pnpm enforces the same age at install time (pnpm-workspace.yaml), so a PR never carries a version the lockfile check rejects.",
+    "In a package repo `plx changeset` commits the changeset a bump owes to the bot's branch (§ 5 PLX-Delivery); that author is ignored, so the branch stays the bot's to rebase."
+  ],
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits", ":maintainLockFilesWeekly"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "minimumReleaseAge": "3 days",
+  "gitIgnoredAuthors": ["plx-bot@users.noreply.github.com"],
+  "copier": {
+    "description": "The hosted bot cannot run `copier update`; the release train's ship step owns template propagation.",
+    "enabled": false
+  },
+  "packageRules": [
+    {
+      "description": "The train's pins (§ 1 PLX-Updates): the plexus-ms/primitives workflow refs and collection pin, the plx pin in mise.toml, and the exact @plexus-ms/config pin are written by `plx ship` in lockstep with the train; the bot never proposes them.",
+      "matchPackageNames": [
+        "plexus-ms/primitives",
+        "https://github.com/plexus-ms/primitives.git",
+        "@plexus-ms/cli",
+        "@plexus-ms/config"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "npm ranges follow the version actually tested; other managers keep their own spelling, so a floating .node-version major stays floating.",
+      "matchManagers": ["npm"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "@plexus-ms packages are the initiative's own, published with immutable, provenance-attested versions: no release-age wait, and patch and minor merge unattended once CI is green.",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["@plexus-ms/**"],
+      "minimumReleaseAge": null
+    },
+    {
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["@plexus-ms/**"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Dev tools that check and orchestrate but never become a runtime dependency of an app: patch and minor merge unattended once CI is green, after the preset-wide three-day wait.",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["turbo", "typescript", "@types/**", "@biomejs/biome"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "The ansible-galaxy manager hands a github.com git URL to the github-tags datasource verbatim, which resolves only owner/repo.",
+      "matchManagers": ["ansible-galaxy"],
+      "matchPackageNames": ["https://github.com/plexus-ms/primitives.git"],
+      "overridePackageName": "plexus-ms/primitives"
+    },
+    {
+      "description": "The app is the unit of deployment (§ 3 PLX-Delivery): the images in one app's compose file move as one PR, so one merge is one deploy and its services never run mismatched versions. The group is named after the app directory, apps/<app>/.",
+      "matchManagers": ["docker-compose"],
+      "matchFileNames": ["apps/*/**"],
+      "groupName": "app {{lookup (split packageFileDir \"/\") 1}}"
+    },
+    {
+      "description": "A node major moves the runtime of every app in the repo at once: it waits for approval on the dependency dashboard.",
+      "matchDepNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "A package's `engines.node` floor states the major it supports, not the patch it was last tested on: the bump strategy would raise it on every LTS patch, so engines updates are off; the runtime itself moves with .node-version.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["engines"],
+      "matchDepNames": ["node"],
+      "enabled": false
+    },
+    {
+      "description": "A TypeScript major changes the compiler every app and package in the repo builds with: it waits for approval on the dependency dashboard.",
+      "matchDatasources": ["npm"],
+      "matchDepNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

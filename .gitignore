@@ -1,0 +1,15 @@
+# deps
+node_modules
+
+# misc
+.DS_Store
+*.pem
+
+# build
+dist
+
+# turbo
+.turbo
+
+# ansible
+.ansible/

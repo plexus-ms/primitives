@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+catalog:
+  typescript: ^6.0.3
+allowBuilds:
+  esbuild: true
+# A third-party release is installable three days after it is published (§ 2 PLX-Updates);
+# the shared Renovate preset waits the same three days before proposing it.
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - "@plexus-ms/*"

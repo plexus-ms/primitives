@@ -1,0 +1,14 @@
+{
+  "name": "primitives",
+  "private": true,
+  "packageManager": "pnpm@12.15.0",
+  "scripts": {
+    "prepare": "turbo run build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@plexus-ms/cli": "workspace:*",
+    "@plexus-ms/config": "workspace:*",
+    "turbo": "^2.11.10"
+  }
+}

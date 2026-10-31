@@ -1,0 +1,26 @@
+amends "package://github.com/jdx/hk/releases/download/v1.48.0/hk@1.48.0#/Config.pkl"
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = true
+    steps {
+      ["lint"] {
+        glob = List("**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.css", "**/*.json")
+        check = "mise :lint {{ files }}"
+        fix = "mise :lint --write {{ files }}"
+      }
+      ["ops"] {
+        glob = List("ansible/**", "tests/**", ".github/workflows/*.yml")
+        check = "mise :check-ops"
+      }
+    }
+  }
+  ["pre-push"] {
+    steps {
+      ["check"] {
+        check = "mise :check"
+      }
+    }
+  }
+}

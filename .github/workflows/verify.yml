@@ -1,0 +1,20 @@
+name: verify
+
+# Mounts the verify verb on every push (§ 2 PLX-Delivery): the same `mise
+# verify` the pre-push hook runs, through this repo's own reusable workflow.
+# Every push includes the update bot's branches, whose pull requests merge
+# unattended only once a check is green, and the train's bookkeeping commits.
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    uses: ./.github/workflows/_verify.yml
