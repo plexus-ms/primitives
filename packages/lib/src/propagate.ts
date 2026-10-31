@@ -19,6 +19,9 @@
 // through `Context.stage`: performed in every mode, since nothing the operator
 // owns changes.
 //
+// The per-consumer work (`takeTrain`) is shared with `update` (update.ts), the
+// same pull request opened from inside the consumer itself.
+//
 //   plx propagate ~/dev                   # to the current train
 //   plx -n propagate ~/dev                # preview in scratch clones
 //   plx -y propagate ~/dev --train 0.66.0 # unattended: copier takes defaults
@@ -51,30 +54,45 @@ export interface Summary {
 export const isClean = (s: Summary): boolean =>
   s.conflicted.length === 0 && s.failed.length === 0 && s.skipped.length === 0;
 
-const BASE_TAG = 'ship-base';
-const trainBranch = (train: string): string => `train/${train}`;
+export const emptySummary = (train: string, preview: boolean): Summary => ({
+  train,
+  preview,
+  clean: [],
+  conflicted: [],
+  failed: [],
+  skipped: [],
+  pulls: [],
+});
+
+export const trainBranch = (train: string): string => `train/${train}`;
+
+/** How a consumer takes the train: the knobs propagate and update set differently. */
+export interface Take {
+  train: string;
+  /**
+   * Preview from the local preset checkouts under this upstream directory at
+   * main (propagate's dry run), instead of the published template.
+   */
+  previewFrom?: string;
+  /** The template ref copier updates to; unset, copier takes the newest tag, which the train just cut. */
+  ref?: string;
+  /** Who opened the pull request, named in its body. */
+  opener: string;
+}
 
 /**
- * copier at the version plx pins, through mise, with the clone's own mise
+ * copier at the version plx pins, through mise, with the consumer's own mise
  * config ignored: copier needs no project tool, and a root `mise.toml` left
  * with conflict markers by the root site's update would otherwise fail every
- * later mise call in the clone, the apps' updates first of all.
+ * later mise call in the directory, the apps' updates first of all.
  */
-const copierIn = (clone: string, args: string[]): [string, string[]] => [
+const copierIn = (dir: string, args: string[]): [string, string[]] => [
   'env',
-  [`MISE_IGNORED_CONFIG_PATHS=${clone}`, 'mise', ...copierVia(args)],
+  [`MISE_IGNORED_CONFIG_PATHS=${dir}`, 'mise', ...copierVia(args)],
 ];
 
 export async function propagate(ctx: Context, workspace: string, train: string): Promise<Summary> {
-  const summary: Summary = {
-    train,
-    preview: ctx.dryRun,
-    clean: [],
-    conflicted: [],
-    failed: [],
-    skipped: [],
-    pulls: [],
-  };
+  const summary = emptySummary(train, ctx.dryRun);
   const upstream = join(workspace, UPSTREAM);
   const tree = await overview(ctx, workspace);
   const upstreamDir = tree.children.find((c) => c.path === upstream);
@@ -90,6 +108,7 @@ export async function propagate(ctx: Context, workspace: string, train: string):
     if (!consumers.some((c) => c.sites.some((s) => s.preset === preset)))
       ctx.say(`• no consumers of ${presetSource(preset)} found under ${workspace}`);
 
+  const take: Take = { train, opener: '`plx ship`', ...(ctx.dryRun ? { previewFrom: upstream } : {}) };
   const scratch = (await ctx.stage(run('mktemp', ['-d'])))?.trim() ?? '';
   try {
     for (const consumer of consumers) {
@@ -98,16 +117,12 @@ export async function propagate(ctx: Context, workspace: string, train: string):
       ctx.say(`→ ${consumer.rel}: clone ${consumer.origin} at ${consumer.branch}`);
       try {
         await ctx.stage(run('git', ['clone', '--quiet', '--branch', consumer.branch, consumer.origin, clone]));
-        await ctx.stage(run('git', ['tag', BASE_TAG], { cwd: clone }));
       } catch (error) {
         ctx.say(`  ✗ FAILED — clone${detail(error)}`);
         summary.failed.push(consumer.rel);
         continue;
       }
-      for (const site of consumer.sites) await updateSite(ctx, consumer, site, clone, upstream, summary);
-      await refreshLockfile(ctx, consumer, clone, summary);
-      await bumpConsumerRefs(ctx, consumer, clone, train);
-      await openPull(ctx, consumer, clone, train, summary);
+      await takeTrain(ctx, consumer, clone, take, summary);
     }
   } finally {
     if (scratch) await ctx.stage(run('rm', ['-rf', scratch]));
@@ -115,10 +130,23 @@ export async function propagate(ctx: Context, workspace: string, train: string):
   return summary;
 }
 
+/**
+ * One consumer takes the train in `dir`, a scratch checkout of its branch:
+ * every site updated, the lockfile refreshed, the workflow refs bumped, then
+ * the commit, the branch and the pull request.
+ */
+export async function takeTrain(ctx: Context, consumer: Consumer, dir: string, take: Take, summary: Summary) {
+  const base = (await ctx.read('git', ['rev-parse', 'HEAD'], { cwd: dir })).trim();
+  for (const site of consumer.sites) await updateSite(ctx, consumer, site, dir, take, summary);
+  await refreshLockfile(ctx, consumer, dir, base, summary);
+  await bumpConsumerRefs(ctx, consumer, dir, take.train);
+  await openPull(ctx, consumer, dir, take, summary);
+}
+
 // Preview commits are plain plumbing on a throwaway clone: unsigned, no hooks, a stand-in identity.
-const previewCommit = (ctx: Context, clone: string, message: string) =>
+const previewCommit = (ctx: Context, dir: string, message: string) =>
   ctx
-    .stage(run('git', ['add', '-A'], { cwd: clone }))
+    .stage(run('git', ['add', '-A'], { cwd: dir }))
     .then(() =>
       ctx.stage(
         run(
@@ -137,7 +165,7 @@ const previewCommit = (ctx: Context, clone: string, message: string) =>
             '-m',
             message,
           ],
-          { cwd: clone },
+          { cwd: dir },
         ),
       ),
     );
@@ -146,45 +174,45 @@ async function updateSite(
   ctx: Context,
   consumer: Consumer,
   site: Site,
-  clone: string,
-  upstream: string,
+  dir: string,
+  take: Take,
   summary: Summary,
 ): Promise<void> {
-  const target = join(clone, relative(consumer.path, site.path));
-  const localPreset = join(upstream, site.preset);
+  const target = join(dir, relative(consumer.path, site.path));
   try {
-    if (ctx.dryRun) {
+    if (take.previewFrom) {
+      const localPreset = join(take.previewFrom, site.preset);
       ctx.say(`→ ${site.rel}: copier update (preview from ${localPreset}@main)`);
-      // Point the clone's answers at the local preset so the preview reads it;
-      // copier refuses a dirty subproject, hence the commit.
+      // Point the answers at the local preset so the preview reads it; copier
+      // refuses a dirty subproject, hence the commit.
       const answers = await ctx.readFile(join(target, ANSWERS_FILE));
       await ctx.stage(
         write(join(target, ANSWERS_FILE), answers.replace(/^_src_path: .*$/m, `_src_path: ${localPreset}`)),
       );
-      await previewCommit(ctx, clone, `plx preview: ${site.rel} reads ${localPreset} from the local checkout`);
+      await previewCommit(ctx, dir, `plx preview: ${site.rel} reads ${localPreset} from the local checkout`);
       await ctx.stage(
         run(
-          ...copierIn(clone, [
-            'update',
-            '--skip-answered',
-            '--trust',
-            '--defaults',
-            '--skip-tasks',
-            '--vcs-ref',
-            'main',
-          ]),
-          {
-            cwd: target,
-          },
+          ...copierIn(dir, ['update', '--skip-answered', '--trust', '--defaults', '--skip-tasks', '--vcs-ref', 'main']),
+          { cwd: target },
         ),
       );
     } else {
-      ctx.say(`→ ${site.rel}: copier update`);
+      ctx.say(`→ ${site.rel}: copier update${take.ref ? ` to ${take.ref}` : ''}`);
       // Template tasks (mise install, hook setup) serve a developer's checkout,
       // not a pull request. Unattended, a new question takes its default; on a
-      // terminal copier asks.
-      const args = ['update', '--skip-answered', '--trust', '--skip-tasks', ...(ctx.yes ? ['--defaults'] : [])];
-      await ctx.apply([run(...copierIn(clone, args), { cwd: target, interactive: true })]);
+      // terminal copier asks. A dry run previews on the scratch checkout, so
+      // the step is staged there rather than only announced.
+      const args = [
+        'update',
+        '--skip-answered',
+        '--trust',
+        '--skip-tasks',
+        ...(take.ref ? ['--vcs-ref', take.ref] : []),
+        ...(ctx.yes || ctx.dryRun ? ['--defaults'] : []),
+      ];
+      const step = run(...copierIn(dir, args), { cwd: target, interactive: !ctx.dryRun });
+      if (ctx.dryRun) await ctx.stage(step);
+      else await ctx.apply([step]);
     }
   } catch (error) {
     ctx.say(`  ✗ FAILED — copier update exited nonzero${detail(error)}`);
@@ -216,13 +244,13 @@ async function updateSite(
     summary.clean.push(site.rel);
   }
   for (const line of status.split('\n').filter(Boolean)) ctx.say(`    ${line}`);
-  // Each preview site is committed so the next site's answers rewrite starts
-  // from a clean tree. The real run stages instead: a conflict leaves unmerged
-  // index entries, and copier's own git plumbing (`git write-tree`) refuses an
-  // index with those, so the next site's update would fail; staged, the
-  // markers are in the tree and the index is whole.
-  if (ctx.dryRun) await previewCommit(ctx, clone, `plx preview: ${site.rel} updated`);
-  else await ctx.stage(run('git', ['add', '-A'], { cwd: clone }));
+  // Each preview-from-local site is committed so the next site's answers
+  // rewrite starts from a clean tree. Otherwise the site is staged: a conflict
+  // leaves unmerged index entries, and copier's own git plumbing (`git
+  // write-tree`) refuses an index with those, so the next site's update would
+  // fail; staged, the markers are in the tree and the index is whole.
+  if (take.previewFrom) await previewCommit(ctx, dir, `plx preview: ${site.rel} updated`);
+  else await ctx.stage(run('git', ['add', '-A'], { cwd: dir }));
 }
 
 /** The marker's `plexus` follows the answers file's `_commit` after an update (bookkeeping.ts). */
@@ -237,18 +265,18 @@ async function syncSiteMarker(ctx: Context, site: Site, target: string): Promise
   await ctx.stage(write(join(target, MARKER_FILE), synced));
 }
 
-/** Refresh the lockfile when the updates touched a manifest (`mise exec` trusts the clone's config on its own). */
-async function refreshLockfile(ctx: Context, consumer: Consumer, clone: string, summary: Summary): Promise<void> {
-  if ((await ctx.readFile(join(clone, 'pnpm-workspace.yaml')).catch(() => undefined)) === undefined) return;
+/** Refresh the lockfile when the updates touched a manifest (`mise exec` trusts the directory's own config). */
+async function refreshLockfile(ctx: Context, consumer: Consumer, dir: string, base: string, summary: Summary) {
+  if ((await ctx.readFile(join(dir, 'pnpm-workspace.yaml')).catch(() => undefined)) === undefined) return;
   const manifests = ['*package.json', 'pnpm-workspace.yaml'];
   const unchanged = await ctx
-    .read('git', ['diff', '--quiet', BASE_TAG, '--', ...manifests], { cwd: clone })
+    .read('git', ['diff', '--quiet', base, '--', ...manifests], { cwd: dir })
     .then(() => true)
     .catch(() => false);
   if (unchanged) return;
   ctx.say(`→ ${consumer.rel}: pnpm install (manifests changed)`);
   try {
-    await ctx.apply([run('mise', ['exec', '--', 'pnpm', 'install', '--reporter=silent'], { cwd: clone })]);
+    await ctx.apply([run('mise', ['exec', '--', 'pnpm', 'install', '--reporter=silent'], { cwd: dir })]);
   } catch (error) {
     ctx.say(`  ✗ pnpm install failed${detail(error)}`);
     summary.failed.push(`${consumer.rel}/pnpm-lock.yaml`);
@@ -256,29 +284,38 @@ async function refreshLockfile(ctx: Context, consumer: Consumer, clone: string, 
 }
 
 /** Consumers' hand-owned workflows pin the reusable workflows by tag; lockstep them to the train. */
-async function bumpConsumerRefs(ctx: Context, consumer: Consumer, clone: string, train: string): Promise<void> {
-  const dir = join(clone, '.github', 'workflows');
-  const entries = await ctx.readDir(dir).catch(() => []);
+async function bumpConsumerRefs(ctx: Context, consumer: Consumer, dir: string, train: string): Promise<void> {
+  const workflows = join(dir, '.github', 'workflows');
+  const entries = await ctx.readDir(workflows).catch(() => []);
   const files = entries
     .filter((e) => !e.directory && /\.ya?ml$/.test(e.name))
     .map((e) => e.name)
     .sort();
   for (const f of files) {
-    const text = await ctx.readFile(join(dir, f));
+    const text = await ctx.readFile(join(workflows, f));
     if (!text.includes(WORKFLOW_REF)) continue;
     const bumped = bumpWorkflowRefs(text, train);
     if (bumped === text) continue;
     ctx.say(`→ ${consumer.rel}: ${f} workflow refs → @${train}`);
-    await ctx.stage(write(join(dir, f), bumped));
+    await ctx.stage(write(join(workflows, f), bumped));
   }
+}
+
+/** The URL of the open pull request from the train branch against the consumer's branch, if any. */
+export async function openPullUrl(ctx: Context, consumer: Consumer, dir: string, train: string): Promise<string> {
+  const args = ['pr', 'list', '--head', trainBranch(train), '--base', consumer.branch, '--state', 'open'];
+  return (await ctx.read('gh', [...args, '--json', 'url', '--jq', '.[0].url'], { cwd: dir }).catch(() => '')).trim();
 }
 
 /**
  * One commit, the train branch pushed, and a pull request against the
  * consumer's branch: opened once, found again on a re-run. The branch is plx's
- * own, so a re-run may move it, with a lease on what it fetched.
+ * own, so a re-run may move it, with a lease on what it fetched. Hooks are
+ * skipped: the checks are the pull request's job, and the mount's own
+ * checkout may carry the repo's hooks.
  */
-async function openPull(ctx: Context, consumer: Consumer, clone: string, train: string, summary: Summary) {
+async function openPull(ctx: Context, consumer: Consumer, dir: string, take: Take, summary: Summary) {
+  const { train } = take;
   const branch = trainBranch(train);
   if (ctx.dryRun) {
     ctx.say(
@@ -286,52 +323,33 @@ async function openPull(ctx: Context, consumer: Consumer, clone: string, train: 
     );
     return;
   }
-  if ((await ctx.read('git', ['status', '--porcelain'], { cwd: clone })).trim() === '') {
+  if ((await ctx.read('git', ['status', '--porcelain'], { cwd: dir })).trim() === '') {
     ctx.say(`• ${consumer.rel}: nothing changed — no pull request`);
     return;
   }
-  const head = `${consumer.origin} ${branch}`;
+  const head = `${consumer.origin ?? 'origin'} ${branch}`;
   try {
     await ctx.apply([
-      run('git', ['add', '-A'], { cwd: clone }),
-      run('git', ['commit', '--quiet', '--no-verify', '-m', `chore: train ${train}`], { cwd: clone }),
+      run('git', ['add', '-A'], { cwd: dir }),
+      run('git', ['commit', '--quiet', '--no-verify', '-m', `chore: train ${train}`], { cwd: dir }),
     ]);
     // The lease needs the remote-tracking ref; a fresh clone has none for a branch it did not check out.
     await ctx
       .read('git', ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
-        cwd: clone,
+        cwd: dir,
       })
       .catch(() => '');
     await ctx.apply([
-      run('git', ['push', '--quiet', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], { cwd: clone }),
+      run('git', ['push', '--quiet', '--no-verify', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], {
+        cwd: dir,
+      }),
     ]);
   } catch (error) {
     ctx.say(`  ✗ FAILED — push to ${head}${detail(error)}`);
     summary.failed.push(consumer.rel);
     return;
   }
-  const existing = (
-    await ctx
-      .read(
-        'gh',
-        [
-          'pr',
-          'list',
-          '--head',
-          branch,
-          '--base',
-          consumer.branch,
-          '--state',
-          'open',
-          '--json',
-          'url',
-          '--jq',
-          '.[0].url',
-        ],
-        { cwd: clone },
-      )
-      .catch(() => '')
-  ).trim();
+  const existing = await openPullUrl(ctx, consumer, dir, train);
   if (existing) {
     ctx.say(`• ${consumer.rel}: pull request updated: ${existing}`);
     summary.pulls.push(existing);
@@ -344,7 +362,7 @@ async function openPull(ctx: Context, consumer: Consumer, clone: string, train: 
     conflicted.length > 0
       ? `Conflicts to resolve, committed with their markers: ${conflicted.join(', ')}.`
       : 'Merged clean at every site.',
-    'Opened by `plx ship`.',
+    `Opened by ${take.opener}.`,
   ].join('\n\n');
   try {
     await ctx.apply([
@@ -362,7 +380,7 @@ async function openPull(ctx: Context, consumer: Consumer, clone: string, train: 
           '--body',
           body,
         ],
-        { cwd: clone },
+        { cwd: dir },
       ),
     ]);
   } catch (error) {
@@ -370,35 +388,12 @@ async function openPull(ctx: Context, consumer: Consumer, clone: string, train: 
     summary.failed.push(consumer.rel);
     return;
   }
-  const url = (
-    await ctx
-      .read(
-        'gh',
-        [
-          'pr',
-          'list',
-          '--head',
-          branch,
-          '--base',
-          consumer.branch,
-          '--state',
-          'open',
-          '--json',
-          'url',
-          '--jq',
-          '.[0].url',
-        ],
-        {
-          cwd: clone,
-        },
-      )
-      .catch(() => '')
-  ).trim();
+  const url = await openPullUrl(ctx, consumer, dir, train);
   ctx.say(`• ${consumer.rel}: pull request opened${url ? `: ${url}` : ''}`);
   summary.pulls.push(url || `${consumer.rel} ${branch}`);
 }
 
-const detail = (error: unknown): string => {
+export const detail = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   const last = message.trim().split('\n').at(-1) ?? '';
   return last && !/exited with/.test(last) ? `: ${last}` : '';

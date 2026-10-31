@@ -32,7 +32,7 @@ export function register(program: Command): void {
 }
 
 /** The summary: one line per site, the pull requests, then the verdict. */
-export function renderSummary(s: Summary, realCommand: string): string {
+export function renderSummary(s: Summary, realCommand: string, verb = 'propagate'): string {
   const lines = ['── summary ──────────────────────────────────────────────────────────────'];
   for (const p of s.clean) lines.push(`  ✓ clean:      ${p}`);
   for (const p of s.conflicted) lines.push(`  ✗ conflicts:  ${p}`);
@@ -46,6 +46,6 @@ export function renderSummary(s: Summary, realCommand: string): string {
   } else if (clean) {
     lines.push('✓ done — review and merge the pull requests');
   }
-  if (!clean) lines.push('✗ needs attention — see above; fix the consumer, then re-run propagate');
+  if (!clean) lines.push(`✗ needs attention — see above; fix the consumer, then re-run ${verb}`);
   return lines.join('\n');
 }

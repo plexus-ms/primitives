@@ -102,3 +102,4 @@ export {
   UPSTREAM,
   UsageError,
 } from './train.ts';
+export { PRESETS, type UpdateOptions, update } from './update.ts';

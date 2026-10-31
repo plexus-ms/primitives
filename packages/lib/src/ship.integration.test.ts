@@ -17,6 +17,7 @@
 // and, on primitives, "publishes" the train to the fake registry. Knobs:
 //   FAKE_GH_LOGGED_OUT=1              `gh auth status` fails
 //   FAKE_GH_MUTABLE=1                 releases are created mutable
+// `api repos/<o>/<r>/releases/latest` answers the newest release of that repo.
 // Fake npm: `npm view <pkg>@<v> version` answers once primitives' release of
 // v exists and FAKE_NPM_POLLS polls have gone by; FAKE_NPM_NEVER=1 never answers.
 // Every invocation is appended to FAKE_LOG.
@@ -39,8 +40,10 @@ import { after, test } from 'node:test';
 import { Context, type Options } from './context.ts';
 import { COPIER_VERSION } from './copier.ts';
 import { realIo } from './io.ts';
+import type { Summary } from './propagate.ts';
 import { type ShipOptions, type ShipResult, ship } from './ship.ts';
 import { TRAIN_REPOS } from './train.ts';
+import { type UpdateOptions, update } from './update.ts';
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), 'plx-ship-')));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -91,6 +94,8 @@ if [ "$1" = exec ] && [[ "$2" == copier@* ]] && [ "$3" = -- ]; then shift 3; exe
 script(
   'gh',
   `repo="$(basename "$(git remote get-url origin 2>/dev/null || echo "$PWD")" .git)"
+# \`gh api repos/<owner>/<repo>/...\` names its repo in the path.
+case "$2" in repos/[!{]*/[!{]*/*) r="\${2#repos/*/}"; repo="\${r%%/*}" ;; esac
 echo "gh[$repo] $*" >> "$FAKE_LOG"
 dir="$FAKE_FORGE/$repo"; mkdir -p "$dir"
 arg() { local k="$1"; shift; while [ $# -gt 0 ]; do [ "$1" = "$k" ] && { echo "$2"; return; }; shift; done; }
@@ -104,6 +109,7 @@ case "$1 $2" in
   "api "*)
     case "$2" in
       *"/releases/tags/"*) cat "$dir/release-\${2##*/}" ;;
+      *"/releases/latest") ls "$dir" | sed -n 's/^release-//p' | sort -V | tail -1 ;;
       *) ls "$dir"/release-* 2>/dev/null | tail -1 | xargs -r cat ;;
     esac ;;
   "pr list") f="$dir/pr-$(arg --head "$@" | tr / -)"; [ ! -f "$f" ] || cat "$f" ;;
@@ -310,6 +316,34 @@ async function run(options: Options, args: Partial<ShipOptions> = {}): Promise<R
     return { error: error instanceof Error ? error.message : String(error), out };
   }
 }
+
+interface UpdateRun {
+  result?: Summary;
+  error?: string;
+  out: string;
+}
+
+/** `update` run from inside a tenant repo, like its CI or a developer would. */
+async function runUpdate(options: Options, args: UpdateOptions): Promise<UpdateRun> {
+  const stderr = new PassThrough();
+  let out = '';
+  stderr.on('data', (c: Buffer) => {
+    out += c;
+  });
+  const io = { ...realIo(), stdout: new PassThrough(), stderr };
+  const ctx = new Context(options, io);
+  try {
+    return { result: await update(ctx, args), out };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error), out };
+  }
+}
+
+/** A release of a train repo on the fake forge, as ship would have created it. */
+const releaseOf = (r: string, v: string) => {
+  mkdirSync(join(FORGE(), r), { recursive: true });
+  writeFileSync(join(FORGE(), r, `release-${v}`), 'true\n');
+};
 
 const tagged = (r: string, v: string) => {
   try {
@@ -753,4 +787,120 @@ test('the confirmation aborts cleanly without a terminal', async () => {
   assert.match(error ?? '', /cannot ask .* without a terminal; pass --yes/);
   assert.ok(noneTagged('0.2.0'));
   assert.ok(!has(out, 'stopped during the release'), 'no recovery hint (nothing was started)');
+});
+
+// ── the tenant-side pull: update ─────────────────────────────────────────────
+test('update: a repo takes the newest train itself, in a worktree, and leaves its checkout alone', async () => {
+  fixture('update');
+  releaseOf('preset-repo-web', '0.1.0');
+  releaseOf('preset-repo-web', '0.2.0');
+  const web = join(WS, 'acme/web');
+  git(web, 'checkout', '--quiet', '-b', 'feature/x');
+  put(join(web, 'notes.txt'), 'scratch\n');
+  const { result, error, out } = await runUpdate({ yes: true }, { repo: web });
+  assert.equal(error, undefined, out);
+  assert.ok(has(out, '→ web: worktree of origin/develop'));
+  const runs = copierRuns();
+  assert.equal(runs.length, 2, 'copier ran at the root and the app');
+  assert.ok(
+    runs.every(
+      (l) => has(l, '--vcs-ref 0.2.0') && has(l, '--skip-tasks') && has(l, '--defaults') && !l.startsWith(`${WS}/`),
+    ),
+    `copier updated to the train, outside the checkout:\n${runs.join('\n')}`,
+  );
+  assert.ok(
+    fakeLog().some((l) => l.startsWith('mise exec copier@') && !/ ignored=$/.test(l) && !has(l, `ignored=${WS}`)),
+    "the worktree's mise config ignored",
+  );
+  assert.match(onTrain('acme-web', '0.2.0', 'template-owned.txt'), /updated from 0\.2\.0/);
+  assert.match(onTrain('acme-web', '0.2.0', 'apps/site/template-owned.txt'), /updated from 0\.2\.0/);
+  assert.match(onTrain('acme-web', '0.2.0', 'PLEXUS.md'), /^plexus: next$/m, 'marker synced');
+  assert.match(onTrain('acme-web', '0.2.0', '.github/workflows/ci.yml'), /pipeline\.yml@0\.2\.0/, 'refs bumped');
+  assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..train/0.2.0'), '1', 'one commit');
+  assert.equal(pull('acme-web', '0.2.0', '.base'), 'develop');
+  assert.match(pull('acme-web', '0.2.0', '.body'), /Opened by `plx update`/);
+  assert.equal(git(web, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature/x', 'checkout still on its branch');
+  assert.match(read(join(web, 'template-owned.txt')), /^generated$/m, 'checkout not updated');
+  assert.ok(existsSync(join(web, 'notes.txt')), 'local file kept');
+  assert.equal(git(web, 'worktree', 'list').split('\n').length, 1, 'worktree removed');
+  assert.deepEqual(result, {
+    train: '0.2.0',
+    preview: false,
+    clean: ['web', 'web/apps/site'],
+    conflicted: [],
+    failed: [],
+    skipped: [],
+    pulls: ['https://forge/acme-web/pull/1'],
+  });
+
+  // The next day: the branch is on origin, so nothing moves it.
+  const again = await runUpdate({ yes: true }, { repo: web });
+  assert.equal(again.error, undefined, again.out);
+  assert.ok(has(again.out, 'web: train/0.2.0 is already on origin (https://forge/acme-web/pull/1) — nothing to do'));
+  assert.equal(copierRuns().length, 2, 'copier not run again');
+  assert.deepEqual(again.result?.pulls, ['https://forge/acme-web/pull/1']);
+  assert.deepEqual(again.result?.clean, []);
+});
+
+test('update: a repo already at the train does nothing, and one without a release is told so', async () => {
+  fixture('update-current');
+  const plat = join(WS, 'acme/platform');
+  const none = await runUpdate({ yes: true }, { repo: plat });
+  assert.match(none.error ?? '', /no release of plexus-ms\/preset-repo-platform found/);
+  releaseOf('preset-repo-platform', '0.1.0');
+  const { result, error, out } = await runUpdate({ yes: true }, { repo: plat });
+  assert.equal(error, undefined, out);
+  assert.ok(has(out, '• platform: already at 0.1.0'));
+  assert.equal(copierRuns().length, 0);
+  assert.throws(() => onTrain('acme-platform', '0.1.0', 'template-owned.txt'), 'no branch pushed');
+  assert.deepEqual(result?.pulls, []);
+  const notConsumer = await runUpdate({ yes: true }, { repo: up('compendium') });
+  assert.match(notConsumer.error ?? '', /not a repo generated from the presets/);
+  const bad = await runUpdate({ yes: true }, { repo: plat, train: 'v1' });
+  assert.match(bad.error ?? '', /'v1' is not plain semver/);
+  const back = await runUpdate({ yes: true }, { repo: plat, train: '0.0.9' });
+  assert.match(back.error ?? '', /platform is at 0\.1\.0, past 0\.0\.9/);
+});
+
+test('update: the dry run previews in the worktree and pushes nothing', async () => {
+  fixture('update-dry');
+  releaseOf('preset-repo-web', '0.2.0');
+  const web = join(WS, 'acme/web');
+  const { result, error, out } = await runUpdate({ dryRun: true, yes: true }, { repo: web });
+  assert.equal(error, undefined, out);
+  assert.equal(copierRuns().filter((l) => has(l, '--vcs-ref 0.2.0')).length, 2, 'copier previewed both sites');
+  assert.ok(has(out, 'M template-owned.txt'), 'preview shows the change');
+  assert.ok(has(out, '(preview) web: would commit, push train/0.2.0 and open a pull request against develop'));
+  assert.throws(() => onTrain('acme-web', '0.2.0', 'template-owned.txt'), 'nothing pushed');
+  assert.ok(!fakeLog().some((l) => has(l, 'pr create')), 'no pull request');
+  assert.equal(git(web, 'status', '--porcelain'), '', 'checkout clean');
+  assert.equal(git(web, 'worktree', 'list').split('\n').length, 1, 'worktree removed');
+  assert.deepEqual(result?.clean, ['web', 'web/apps/site']);
+  assert.equal(result?.preview, true);
+});
+
+test("update: after ship opened the train's pull request, the tenant's own run finds it", async () => {
+  fixture('update-after-ship');
+  const shipped = await run({ yes: true });
+  assert.equal(shipped.error, undefined, shipped.out);
+  const before = copierRuns().length;
+  const { result, error, out } = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
+  assert.equal(error, undefined, out);
+  assert.ok(has(out, 'platform: train/0.2.0 is already on origin (https://forge/acme-platform/pull/1)'));
+  assert.equal(copierRuns().length, before);
+  assert.deepEqual(result?.pulls, ['https://forge/acme-platform/pull/1']);
+  assert.deepEqual(result?.failed, []);
+});
+
+test('update: a conflict is committed with its markers, the pull request opened, the exit nonzero', async () => {
+  fixture('update-conflict');
+  releaseOf('preset-repo-web', '0.2.0');
+  process.env.FAKE_COPIER_CONFLICT = 'apps/site';
+  const { result, error, out } = await runUpdate({ yes: true }, { repo: join(WS, 'acme/web') });
+  delete process.env.FAKE_COPIER_CONFLICT;
+  assert.equal(error, undefined, out);
+  assert.deepEqual(result?.conflicted, ['web/apps/site']);
+  assert.deepEqual(result?.clean, ['web']);
+  assert.match(onTrain('acme-web', '0.2.0', 'apps/site/template-owned.txt'), /^<<<<<<< /m);
+  assert.match(pull('acme-web', '0.2.0', '.body'), /Conflicts to resolve.*web\/apps\/site/);
 });
