@@ -6,7 +6,7 @@
     "prepare": "turbo run build"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.3",
+    "@biomejs/biome": "2.6.4",
     "@plexus-ms/cli": "workspace:*",
     "@plexus-ms/config": "workspace:*",
     "turbo": "^2.11.10"
