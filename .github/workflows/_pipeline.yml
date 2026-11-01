@@ -4,13 +4,20 @@ name: _pipeline
 # app, release its image, deploy it. One reusable unit because the forge's
 # `needs` connects jobs and never the legs of a matrix: a job after a
 # matrixed job waits for every leg and sees one leg's outputs. The tenant's
-# deploy.yml fans this out over the changed set, one leg per app, and each leg
-# fails on its own. The job keys are the verbs. The verify job carries the
+# pipeline.yml fans this out over the changed set, one leg per app, and each
+# leg fails on its own. The job keys are the verbs. The verify job carries the
 # three steps of _verify.yml inline rather than calling it, so that the
 # path of the gate every leg starts with reads `app (website) / verify`
 # instead of `app (website) / verify / verify`; the two stay identical by
 # hand. Release and deploy call their reusable workflows, which are mounts
 # in their own right for the platform repo, and read `… / release / release`.
+#
+# An image tagged with the commit's SHA is only ever pushed after its verify
+# passed, so the registry is the record of what was verified and released
+# (§ 1 PLX-Delivery): when the image exists, verify and release are skipped
+# and the deploy launches it. That is the fast-forward promotion of `main`
+# to a `develop` tip that was already built there, and the re-run of a
+# pipeline whose deploy failed.
 
 on:
   workflow_call:
@@ -59,15 +66,55 @@ permissions:
 jobs:
   verify:
     runs-on: ${{ inputs.runner }}
+    # One verify per app and ref: a newer push cancels the verify still going
+    # for an older commit, whose image nobody waits for any more, and with it
+    # that run's release and deploy, which have not started. The concurrency
+    # sits on this job and not on the workflow, so that it never reaches a
+    # deploy in flight (cancelling between migrate and up would strand the
+    # host); deploys keep their own group in _deploy.yml.
+    concurrency:
+      group: verify-${{ github.repository }}-${{ github.ref }}-${{ inputs.app }}
+      cancel-in-progress: true
+    outputs:
+      image-ref: ${{ steps.image.outputs.image-ref }}
+      released: ${{ steps.image.outputs.released }}
     steps:
+      # The same reference _release-image.yml resolves for an app without an
+      # image-name of its own.
+      - id: ref
+        name: Resolve the image reference
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "image-ref=ghcr.io/$owner/${{ inputs.app }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: image
+        name: Look the image up in the registry
+        env:
+          IMAGE_REF: ${{ steps.ref.outputs.image-ref }}
+        run: |
+          echo "image-ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$IMAGE_REF" > /dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "$IMAGE_REF exists: verified and released before, nothing to build."
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v7
+        if: ${{ steps.image.outputs.released != 'true' }}
       - uses: jdx/mise-action@v5
+        if: ${{ steps.image.outputs.released != 'true' }}
         with:
           cache: ${{ !inputs.persistent }}
       - run: mise verify apps/${{ inputs.app }}...
+        if: ${{ steps.image.outputs.released != 'true' }}
 
   release:
     needs: verify
+    if: ${{ needs.verify.outputs.released != 'true' }}
     uses: plexus-ms/primitives/.github/workflows/_release-image.yml@0.102.0
     with:
       app: ${{ inputs.app }}
@@ -75,13 +122,15 @@ jobs:
       persistent: ${{ inputs.persistent }}
 
   deploy:
-    needs: release
-    if: ${{ inputs.deploy }}
+    needs: [verify, release]
+    # Deploys after a release, or without one when the image existed; never
+    # after a verify or release that failed or was cancelled.
+    if: ${{ !cancelled() && inputs.deploy && needs.verify.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
     uses: plexus-ms/primitives/.github/workflows/_deploy.yml@0.102.0
     with:
       tenant: ${{ inputs.tenant }}
       app: ${{ inputs.app }}
-      image-ref: ${{ needs.release.outputs.image-ref }}
+      image-ref: ${{ needs.verify.outputs.image-ref }}
       host: ${{ inputs.host }}
       runner: ${{ inputs.runner }}
     secrets:
