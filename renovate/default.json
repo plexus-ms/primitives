@@ -64,9 +64,10 @@
       "groupName": "app {{lookup (split packageFileDir \"/\") 1}}"
     },
     {
-      "description": "A node major moves the runtime of every app in the repo at once: it waits for approval on the dependency dashboard.",
-      "matchDepNames": ["node"],
+      "description": "A node major moves the runtime of every app in the repo at once: it waits for approval on the dependency dashboard. @types/node describes that runtime, so its major is the same decision: both wait together and move in one PR, and the types never run ahead of the node they type.",
+      "matchDepNames": ["node", "@types/node"],
       "matchUpdateTypes": ["major"],
+      "groupName": "node major",
       "dependencyDashboardApproval": true
     },
     {
