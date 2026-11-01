@@ -170,7 +170,7 @@ jobs:
   release:
     needs: verify
     if: ${{ needs.verify.outputs.released != 'true' }}
-    uses: plexus-ms/primitives/.github/workflows/_release-image.yml@0.103.0
+    uses: plexus-ms/primitives/.github/workflows/_release-image.yml@0.104.0
     with:
       app: ${{ inputs.app }}
       runner: ${{ inputs.runner }}
@@ -181,7 +181,7 @@ jobs:
     # Deploys after a release, or without one when the image existed; never
     # after a verify or release that failed or was cancelled.
     if: ${{ !cancelled() && inputs.deploy && needs.verify.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
-    uses: plexus-ms/primitives/.github/workflows/_deploy.yml@0.103.0
+    uses: plexus-ms/primitives/.github/workflows/_deploy.yml@0.104.0
     with:
       tenant: ${{ inputs.tenant }}
       app: ${{ inputs.app }}
