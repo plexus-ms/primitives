@@ -6,7 +6,7 @@ name: _pipeline
 # matrixed job waits for every leg and sees one leg's outputs. The tenant's
 # pipeline.yml fans this out over the changed set, one leg per app, and each
 # leg fails on its own. The job keys are the verbs. The verify job carries the
-# three steps of _verify.yml inline rather than calling it, so that the
+# steps of _verify.yml inline rather than calling it, so that the
 # path of the gate every leg starts with reads `app (website) / verify`
 # instead of `app (website) / verify / verify`; the two stay identical by
 # hand. Release and deploy call their reusable workflows, which are mounts
@@ -54,9 +54,35 @@ on:
         required: false
         type: boolean
         default: false
+      turbo-cache-endpoint:
+        description: >-
+          S3 endpoint of the bucket that backs Turbo's remote cache (§ 8
+          PLX-Delivery), e.g. https://fsn1.your-objectstorage.com. Empty for
+          a provider the server knows by region alone.
+        required: false
+        type: string
+        default: ''
+      turbo-cache-region:
+        description: Region of that bucket, e.g. fsn1.
+        required: false
+        type: string
+        default: ''
+      turbo-cache-bucket:
+        description: >-
+          Bucket that backs Turbo's remote cache, shared by every job of the
+          repo. Empty leaves Turbo with the local cache alone.
+        required: false
+        type: string
+        default: ''
     secrets:
       ssh-key:
         description: Private key authorized as the deploy user on the host.
+        required: false
+      turbo-cache-access-key:
+        description: Access key for the remote cache's bucket.
+        required: false
+      turbo-cache-secret-key:
+        description: Secret key for the remote cache's bucket.
         required: false
 
 permissions:
@@ -105,6 +131,35 @@ jobs:
           fi
       - uses: actions/checkout@v7
         if: ${{ steps.image.outputs.released != 'true' }}
+      # Turbo's remote cache (§ 8 PLX-Delivery): a cache server for the length
+      # of the job, on loopback, backed by the tenant's bucket, so that a task
+      # whose inputs did not change is replayed from any earlier job on any
+      # runner. Its token is minted per job and never leaves the machine; the
+      # port is the first free one, since a host can run several runners.
+      - id: turbo-cache
+        name: Prepare the Turbo remote cache
+        if: ${{ inputs.turbo-cache-bucket != '' && steps.image.outputs.released != 'true' }}
+        run: |
+          port=8585
+          while (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do port=$((port + 1)); done
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "port=$port" >> "$GITHUB_OUTPUT"
+          {
+            echo "TURBO_API=http://127.0.0.1:$port"
+            echo "TURBO_TOKEN=$token"
+            echo "TURBO_TEAM=${GITHUB_REPOSITORY//\//-}"
+          } >> "$GITHUB_ENV"
+      - uses: brunojppb/turbo-cache-server@7a089b8e7cf1579794644119a3561bbb1314c946 # 5.0.0
+        if: ${{ inputs.turbo-cache-bucket != '' && steps.image.outputs.released != 'true' }}
+        env:
+          PORT: ${{ steps.turbo-cache.outputs.port }}
+          S3_ENDPOINT: ${{ inputs.turbo-cache-endpoint }}
+          S3_REGION: ${{ inputs.turbo-cache-region }}
+          S3_BUCKET_NAME: ${{ inputs.turbo-cache-bucket }}
+          S3_ACCESS_KEY: ${{ secrets.turbo-cache-access-key }}
+          S3_SECRET_KEY: ${{ secrets.turbo-cache-secret-key }}
+          S3_USE_PATH_STYLE: 'true'
       - uses: jdx/mise-action@v5
         if: ${{ steps.image.outputs.released != 'true' }}
         with:
