@@ -47,7 +47,7 @@ import {
 } from './bookkeeping.ts';
 import type { Context } from './context.ts';
 import { frontmatterField } from './frontmatter.ts';
-import { type Plan, run, write } from './plan.ts';
+import { type Plan, run, write } from './effects.ts';
 import { propagate, type Summary } from './propagate.ts';
 import { extractRequirements, MAP_PAGE, modulePages } from './requirements.ts';
 import { preflightSelf } from './self.ts';

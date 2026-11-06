@@ -1,7 +1,7 @@
 // @plexus-ms/lib: the core layer of plx, usable without the CLI.
 //
 // A verb here is either a reader returning data, or a pure planner returning
-// a Plan (plan.ts) from what was read. The Context (context.ts) reads through
+// a Plan (effects.ts) from what was read. The Context (context.ts) reads through
 // an injected Io (io.ts) and applies plans, narrating every step; the CLI
 // package is an adapter that maps argv onto this. The parsers of Plexus's own
 // file shapes (marker.ts, copier.ts) live here, once, for every verb.
@@ -26,13 +26,6 @@ export {
   WORKFLOW_REF,
 } from './bookkeeping.ts';
 export { CATALOG_DIRS, type Catalog, type Module, parseModule, readCatalog } from './catalog.ts';
-export {
-  type ChangedApps,
-  type ChangedAppsInput,
-  type Reason,
-  readChangedApps,
-  selectChangedApps,
-} from './changedApps.ts';
 export {
   CHANGESET_DIR,
   type Changeset,
@@ -75,7 +68,7 @@ export {
   type TemplateFacet,
 } from './model.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';
-export { body, describe, type Plan, run, type Step, write } from './plan.ts';
+export { body, describe, type Plan, run, type Step, write } from './effects.ts';
 export { isClean, propagate, type Summary } from './propagate.ts';
 export {
   type CompendiumCheck,

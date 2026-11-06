@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import { Context, type Options } from './context.ts';
 import { type ExecOptions, type Io, realIo } from './io.ts';
-import { run, write } from './plan.ts';
+import { run, write } from './effects.ts';
 import { fakeIo } from './testing/fakeIo.ts';
 
 /** A fake Io that records what it was asked and performs nothing. */

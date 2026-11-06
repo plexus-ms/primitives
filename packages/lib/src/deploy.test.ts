@@ -288,6 +288,27 @@ test('the same image from a changed file, or unhealthy, deploys in full', async 
   assert.equal(result.unchanged, undefined);
 });
 
+test('a third-party file the host already serves, running and healthy: nothing pulled, nothing restarted', async () => {
+  const tree: Tree = { repo: { apps: { beszel: { 'compose.yaml': PINNED } } } };
+  const same = harness(tree, host('ghcr.io/x/beszel:1.0'));
+  const result = await deploy(same.ctx, { host: 'deploy@h', tenant: 't', app: 'beszel', dir: '/repo' });
+  assert.equal(result.unchanged, true);
+  assert.equal(result.live, 'ghcr.io/x/beszel:1.0');
+  assert.ok(!same.commands.some((c) => c.endsWith(' pull')));
+  assert.ok(!same.commands.some((c) => c.endsWith('up -d --remove-orphans')));
+  assert.match(same.err(), /✓ ghcr.io\/x\/beszel:1.0 is already live and healthy; nothing to do/);
+
+  // A changed file (a new pin) deploys in full.
+  const h = host('ghcr.io/x/beszel:0.9');
+  const base = h.answer.bind(h);
+  h.answer = (c, i) => (c.includes('cmp -s compose.yaml .incoming/compose.yaml') ? undefined : base(c, i));
+  const changed = harness(tree, h);
+  const full = await deploy(changed.ctx, { host: 'deploy@h', tenant: 't', app: 'beszel', dir: '/repo' });
+  assert.equal(full.unchanged, undefined);
+  assert.ok(changed.commands.some((c) => c.endsWith(' pull')));
+  assert.equal(full.live, 'ghcr.io/x/beszel:1.0');
+});
+
 test('the default app dir keys on the deployment slug: bare in production, suffixed elsewhere', () => {
   assert.equal(defaultAppDir('plexus', 'website'), '/opt/stacks/plexus/website');
   assert.equal(defaultAppDir('plexus', 'website', 'production'), '/opt/stacks/plexus/website');

@@ -29,7 +29,7 @@ import { dirname, join } from 'node:path';
 import { parse } from 'yaml';
 import type { Context } from './context.ts';
 import { ExecError } from './io.ts';
-import { type Plan, run, write } from './plan.ts';
+import { type Plan, run, write } from './effects.ts';
 
 export const CHANGESET_DIR = '.changeset';
 

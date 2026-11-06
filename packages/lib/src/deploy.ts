@@ -31,7 +31,9 @@
 // the app service by convention; it is the one the live image and the
 // readiness path are read from, every other service rides along with pull
 // and up. A third-party app pins its image inside compose.yaml and passes no
-// image ref; the file is then placed as is.
+// image ref; the file is then placed as is. Where the host already serves
+// the same file with `web` running and healthy, with or without a ref, the
+// verb ends there: nothing is pulled, migrated or restarted.
 //
 //   plx deploy deploy@1.2.3.4 plexus website --image ghcr.io/org/website:<sha>
 //   plx deploy deploy@1.2.3.4 plexus website --environment staging --image …   # into /opt/stacks/plexus/website-staging
@@ -42,7 +44,7 @@ import { join } from 'node:path';
 import type { Context } from './context.ts';
 import { DEFAULT_ENVIRONMENT, deploymentSlug } from './deployTargets.ts';
 import { ExecError } from './io.ts';
-import { run } from './plan.ts';
+import { run } from './effects.ts';
 import { UsageError } from './train.ts';
 
 export interface DeployOptions {
@@ -78,7 +80,7 @@ export interface Deploy {
   live?: string;
   healthy: boolean;
   rolledBack: boolean;
-  /** The host already served this image from this run shape, healthy; nothing was pulled or restarted. */
+  /** The host already served this image (or, without a ref, this file) from this run shape, healthy; nothing was pulled or restarted. */
   unchanged?: boolean;
 }
 
@@ -241,15 +243,18 @@ export async function deploy(ctx: Context, options: DeployOptions): Promise<Depl
       return resolvedUrl;
     };
     if (ctx.dryRun) ctx.say('  (nothing more runs when the host already serves this image from this file, healthy)');
-    else if (image && result.previous === image) {
+    else if (image ? result.previous === image : result.previous !== undefined) {
+      // A third-party app passes no ref: its file pins the image, so the same
+      // file with `web` running is the same deployment, and a platform repo
+      // can deploy every app on every push without restarting any.
       const sameFile = await remote.test(`cd ${D} && cmp -s compose.yaml ${INCOMING}/compose.yaml`);
       if (sameFile) {
         resolvedUrl = options.healthUrl || (await resolveHealthUrl(remote, D, dc, ctx));
         if (await remote.test(poll(1))) {
-          result.live = image;
+          result.live = result.previous;
           result.healthy = true;
           result.unchanged = true;
-          ctx.done(`${image} is already live and healthy; nothing to do`);
+          ctx.done(`${result.previous} is already live and healthy; nothing to do`);
           return result;
         }
       }

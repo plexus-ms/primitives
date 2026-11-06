@@ -2,7 +2,7 @@
 // three things a verb does with them.
 //
 //   read   look at the world; always performed, so a dry run sees real state
-//   apply  perform a Plan (plan.ts); every step is narrated with its exact
+//   apply  perform a Plan (effects.ts); every step is narrated with its exact
 //          shell line, and performed unless --dry-run
 //   stage  perform a step on scratch state the run owns (a preview clone, a
 //          temporary directory): narrated as a read, performed even under
@@ -15,7 +15,7 @@
 // stderr, results to stdout, so `plx <verb> | ...` composes like the script
 // it replaces. Conventions: compendium/miscellaneous/cli-design.md.
 import { type DirEntry, type ExecOptions, type Io, realIo } from './io.ts';
-import { body, describe, type Plan, type Step } from './plan.ts';
+import { body, describe, type Plan, type Step } from './effects.ts';
 
 export interface Options {
   dryRun?: boolean;

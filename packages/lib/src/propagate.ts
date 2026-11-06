@@ -32,7 +32,7 @@ import type { Context } from './context.ts';
 import { ANSWERS_FILE, copierVia, parseAnswers } from './copier.ts';
 import { MARKER_FILE } from './marker.ts';
 import { overview } from './overview.ts';
-import { run, write } from './plan.ts';
+import { run, write } from './effects.ts';
 import { TRAIN_REPOS, UPSTREAM } from './train.ts';
 
 export interface Summary {
