@@ -8,15 +8,18 @@
 // From the environment: CI_STRATEGY, CI_REGISTRY; for the pair
 // REGISTRY_ENDPOINT, REGISTRY_REGION, REGISTRY_ACCESS_KEY, REGISTRY_SECRET_KEY
 // (the vault item bucket-registry), GITHUB_REPOSITORY (the owner names the
-// buckets), ZONE; for `rotate` under ghcr, PACKAGES_TOKEN (may delete the
-// organisation's package versions).
+// buckets), ZONE; for `rotate` under ghcr, GITHUB_TOKEN (the workflow's own,
+// with packages: write), which deletes versions of the packages its repo
+// published: the repo's apps, or the ones named.
 //
 //   plx-ci registry
 //   plx-ci registry exists website build-0f2a3f35123dfd73      # exit 0 when it is, 1 otherwise
-//   plx-ci registry rotate
+//   plx-ci registry rotate                                     # the buckets, or the repo's apps in ghcr
 //   plx-ci -n registry rotate                                  # what would go
+
+import { resolve } from 'node:path';
 import type { Command } from 'commander';
-import { Packages, prune } from '../core/ghcr.ts';
+import { Packages, packageOf, prune } from '../core/ghcr.ts';
 import { findTag, loggedIn, rotateBuckets, startSidecars, storageFromEnv } from '../core/registry.ts';
 import { contextOf } from '../program.ts';
 import { imagePrefix, need, ownerOf, registryFor, settings, withStrategy, zoneOf } from './shared.ts';
@@ -58,12 +61,22 @@ export function register(program: Command): void {
     .description(
       'the retention: this month’s bucket exists and the one from two months ago goes; in the forge’s registry, candidates older than thirty days go',
     )
-    .action(async (opts: { strategy?: string }, command: Command) => {
+    .argument('[apps...]', 'under ghcr: the apps whose packages are pruned (default: every directory under apps/)')
+    .option('-C, --dir <dir>', 'the checkout to read', '.')
+    .action(async (apps: string[], opts: { strategy?: string; dir: string }, command: Command) => {
       const ctx = contextOf(command);
       const s = settings(opts);
       const owner = ownerOf(need('GITHUB_REPOSITORY'));
       if (s.registry === 'ghcr') {
-        const result = await prune(ctx, new Packages(ctx, owner, need('PACKAGES_TOKEN')));
+        const all =
+          apps.length > 0
+            ? apps
+            : (await ctx.readDir(`${resolve(opts.dir)}/apps`))
+                .filter((e) => e.directory)
+                .map((e) => e.name)
+                .sort();
+        const names = all.map((app) => packageOf(imagePrefix(), app));
+        const result = await prune(ctx, new Packages(ctx, owner, need('GITHUB_TOKEN')), names);
         ctx.result(result, (r) => r.map((v) => `${v.package} ${v.tags.join(' ')}`).join('\n'));
         return;
       }
