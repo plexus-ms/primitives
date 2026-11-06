@@ -25,8 +25,8 @@ import { findConsumers, presetSource } from './consumers.ts';
 import type { Context } from './context.ts';
 import { ANSWERS_FILE, parseAnswers } from './copier.ts';
 import { compareTrains } from './doctor.ts';
-import { overview } from './overview.ts';
 import { run } from './effects.ts';
+import { overview } from './overview.ts';
 import { detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './propagate.ts';
 import { isTrainVersion, preflightForge, TRAIN_REPOS, UsageError } from './train.ts';
 

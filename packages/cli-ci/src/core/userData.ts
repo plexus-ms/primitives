@@ -1,15 +1,14 @@
-// The two cloud-config templates an instance boots with (ci.md, "Instances"),
-// as text: a runner's, with every teardown layer, and the bare probe's. The
-// placeholders `@@NAME@@` are filled by render(); a leftover placeholder is an
-// error. Kept as string constants so that the bundle carries them and the
+// The cloud-config an instance boots with (§ 8 PLX-Delivery), as text: a
+// runner's, with every teardown layer. The placeholders `@@NAME@@` are filled
+// by render(); a leftover placeholder is an error. Kept as string constants so that the bundle carries them and the
 // tests render them without a loader. The cloud-config itself is documented
 // inline; edit here, nowhere else.
 import { UsageError } from '@plexus-ms/lib';
 
 export const RUNNER_USER_DATA = `#cloud-config
-# One throwaway CI runner (ci.md, "Instances"). Rendered by launch.sh, which
-# fills the placeholders. Every teardown layer is armed here, before the
-# runner exists:
+# One throwaway CI runner (PLX-Delivery, § 8). Rendered by plx-ci hybrid
+# create-instances, which fills the placeholders. Every teardown layer is
+# armed here, before the runner exists:
 #
 #   layer 1   the runner exits after its one job, the instance deletes itself
 #   layer 1b  noJobTimeout, @@NO_JOB_MINUTES@@ minutes after boot with no job ever started,
@@ -25,7 +24,7 @@ export const RUNNER_USER_DATA = `#cloud-config
 #
 # The self-delete key and the registry bucket's write key sit in
 # /etc/plexus-ci/env, readable by root; the job that runs here could read
-# them anyway (ci.md, "Secrets").
+# them anyway (§ 8 PLX-Delivery).
 hostname: @@LABEL@@
 
 write_files:
@@ -64,7 +63,7 @@ write_files:
   # The env file is sourced exported (set -a): exo reads the key from the
   # environment, and a plain source would leave it shell-local. A timer's
   # service has no HOME, and exo refuses to run without one (layers 1b and
-  # 2b failed on it on 2026-11-04, ci.md); the runner's unit has a user.
+  # 2b failed on it on 2026-11-04); the runner's unit has a user.
   - path: /usr/local/sbin/plexus-ci-exo
     permissions: "0755"
     content: |
@@ -108,7 +107,7 @@ write_files:
       set -u
       set -a; . /etc/plexus-ci/env; set +a
       # SELF_LAYERS=off (the launch's SELF_LAYERS, while the boot stall is
-      # investigated, ci.md): layers 1, 1b and 2b log and do nothing; the
+      # investigated): layers 1, 1b and 2b log and do nothing; the
       # power-off, the teardown job and the sweep remain.
       [ "\${SELF_LAYERS:-on}" != off ] || { logger -t plexus-ci "self-delete ($1): layers off, not deleting"; exit 0; }
       id=$(curl -fsS --max-time 10 http://metadata.exoscale.com/latest/meta-data/instance-id) || id=
@@ -122,7 +121,7 @@ write_files:
       #!/bin/sh
       # Layer 1b: the runner spawns a Worker process for a job and nothing
       # else, and logs it as _diag/Worker_*.log; _work itself exists empty
-      # from the runner's start (seen 2026-11-04, ci.md). No Worker log by
+      # from the runner's start (seen 2026-11-04). No Worker log by
       # now means no job ever came, and nothing will.
       set -u
       if ! ls /opt/runner/_diag/Worker_*.log >/dev/null 2>&1; then
@@ -246,39 +245,13 @@ runcmd:
   - cp /etc/plexus-ci/jitconfig /etc/plexus-ci/jitconfig.runner && chown runner:runner /etc/plexus-ci/jitconfig.runner && mv /etc/plexus-ci/jitconfig.runner /etc/plexus-ci/jitconfig
   - . /etc/plexus-ci/env && mkdir -p /opt/runner && cd /opt/runner && curl -fsSLo runner.tgz "https://github.com/actions/runner/releases/download/v\${RUNNER_VERSION}/actions-runner-linux-x64-\${RUNNER_VERSION}.tar.gz" && echo "\${RUNNER_SHA256}  runner.tgz" | sha256sum -c - && tar -xzf runner.tgz && rm runner.tgz && ./bin/installdependencies.sh >/dev/null && chown -R runner:runner /opt/runner
   - plexus-ci-exo version >/dev/null
-  # The registry sidecars, when the launch named a bucket (ci.md, "The registry"): :5000 on this month's bucket, read-write; :5001 on the previous month's, read-only. The same two containers as .github/ci/registry.sh starts on a GitHub runner.
+  # The registry sidecars, when the launch named a bucket (§ 8 PLX-Delivery): :5000 on this month's bucket, read-write; :5001 on the previous month's, read-only. The same two containers as .github/ci/registry.sh starts on a GitHub runner.
   - . /etc/plexus-ci/env && if [ -n "$REGISTRY_ENDPOINT" ]; then docker run -d --name registry --restart unless-stopped -p 127.0.0.1:5000:5000 -e REGISTRY_STORAGE=s3 -e REGISTRY_STORAGE_S3_REGIONENDPOINT="$REGISTRY_ENDPOINT" -e REGISTRY_STORAGE_S3_REGION="$REGISTRY_REGION" -e REGISTRY_STORAGE_S3_BUCKET="$REGISTRY_BUCKET" -e REGISTRY_STORAGE_S3_ACCESSKEY="$REGISTRY_ACCESS_KEY" -e REGISTRY_STORAGE_S3_SECRETKEY="$REGISTRY_SECRET_KEY" -e REGISTRY_STORAGE_S3_FORCEPATHSTYLE=true -e REGISTRY_STORAGE_DELETE_ENABLED=true registry:2 >/dev/null; fi
   - . /etc/plexus-ci/env && if [ -n "$REGISTRY_ENDPOINT" ]; then docker run -d --name registry-previous --restart on-failure:3 -p 127.0.0.1:5001:5000 -e REGISTRY_STORAGE=s3 -e REGISTRY_STORAGE_S3_REGIONENDPOINT="$REGISTRY_ENDPOINT" -e REGISTRY_STORAGE_S3_REGION="$REGISTRY_REGION" -e REGISTRY_STORAGE_S3_BUCKET="$REGISTRY_PREVIOUS_BUCKET" -e REGISTRY_STORAGE_S3_ACCESSKEY="$REGISTRY_ACCESS_KEY" -e REGISTRY_STORAGE_S3_SECRETKEY="$REGISTRY_SECRET_KEY" -e REGISTRY_STORAGE_S3_FORCEPATHSTYLE=true -e 'REGISTRY_STORAGE_MAINTENANCE_READONLY={"enabled":true}' registry:2 >/dev/null; fi
   # A builder: the docker driver cannot export a registry cache, so BuildKit runs in its own container on the host's network, where localhost:5000 is the sidecar; bootstrapped now so that the build does not wait for it.
   - . /etc/plexus-ci/env && if [ "$KIND" = build ]; then su -s /bin/bash runner -c 'docker buildx create --name ci --driver docker-container --driver-opt network=host --bootstrap >/dev/null' & fi
   - . /etc/plexus-ci/env && if [ "$KIND" = test ]; then docker pull -q postgres:18.6 >/dev/null & docker pull -q rustfs/rustfs:1.0.4 >/dev/null & fi
   - systemctl start plexus-ci-runner.service
-`;
-
-export const BARE_USER_DATA = `#cloud-config
-# The bisect probe (ci-dummy with break = bare): nothing but the power-off
-# timer, so that a boot with this and a boot with user-data.yaml tell apart
-# the image from the scripts. The sweep removes a powered-off instance.
-write_files:
-  - path: /etc/systemd/system/plexus-ci-poweroff.service
-    content: |
-      [Unit]
-      Description=plexus-ci: power off at the hard deadline
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/bin/systemctl poweroff
-  - path: /etc/systemd/system/plexus-ci-poweroff.timer
-    content: |
-      [Unit]
-      Description=plexus-ci: layer 2a
-      [Timer]
-      OnBootSec=@@POWEROFF_MINUTES@@min
-      AccuracySec=10s
-      [Install]
-      WantedBy=timers.target
-runcmd:
-  - systemctl daemon-reload
-  - systemctl start plexus-ci-poweroff.timer
 `;
 
 /** The placeholders a template names, in order of appearance, each once. */

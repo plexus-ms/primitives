@@ -1,16 +1,29 @@
-// The registry sidecars (ci.md, "The registry"): `registry:2` on
-// 127.0.0.1:5000 for this month's bucket, read-write, and on 127.0.0.1:5001
-// for the previous month's, read-only. Both are the same registry API over
-// the same object storage; nothing reads the bucket layout directly. The
-// GitHub-hosted jobs start them with this module; an instance's user-data
-// starts the same two containers. In the first month the previous bucket does
-// not exist and registry:2 answers 503 (its storage health check fails): that
+// Where a run's candidates live (§ 8 PLX-Delivery), behind one shape. `own`
+// is the registry pair: `registry:2` on 127.0.0.1:5000 for this month's
+// bucket, read-write, and on 127.0.0.1:5001 for the previous month's,
+// read-only; both the same registry API over the tenant's object storage,
+// nothing reads the bucket layout directly. A runner host keeps the pair
+// running; a forge runner, a launched instance or a large slot starts it for
+// the length of its job. In the first month the previous bucket does not
+// exist and registry:2 answers 503 (its storage health check fails): that
 // sidecar is optional, and a build names it as a cache source only when it
-// answers 200.
+// answers 200. `ghcr` is the forge's registry itself, where the published
+// images live too: nothing to start, the job logs in, and crane and docker
+// reach it.
 import type { Context } from '@plexus-ms/lib';
 import { run } from '@plexus-ms/lib';
 import { Storage, sleep } from './exoscale.ts';
+import type { RegistryKind } from './strategy.ts';
 import { registryBuckets } from './time.ts';
+
+/** The registry the candidates of a run live in; `prefix` is where the images of the forge's registry live, `ghcr.io/<owner>`. */
+export type Registry = { kind: 'own' } | { kind: 'ghcr'; prefix: string };
+
+export const imageName = (prefix: string, app: string): string => `${prefix.toLowerCase().replace(/\/$/, '')}/${app}`;
+
+export function registryOf(kind: RegistryKind, prefix: string): Registry {
+  return kind === 'own' ? { kind } : { kind, prefix };
+}
 
 export interface ObjectStorage {
   endpoint: string;
@@ -37,7 +50,7 @@ export function storageFromEnv(env: NodeJS.ProcessEnv = process.env): ObjectStor
   };
 }
 
-/** The `docker run` of one sidecar; the key on argv is the same exposure as the job's own secrets (ci.md, "Secrets"). */
+/** The `docker run` of one sidecar; the key on argv is the same exposure as the job's own secrets. */
 export function sidecarArgs(
   name: string,
   port: number,
@@ -98,7 +111,7 @@ export interface Sidecars {
  * Create this month's bucket when it does not exist yet (the ci-storage key
  * may), start both sidecars, wait for the current one and briefly for the
  * previous one. Where the current one answers already, the machine runs the
- * pair for its jobs (a slot of a runner host, ci_hybrid_host, which keeps
+ * pair for its jobs (a slot of a runner host, ci_runner_host, which keeps
  * the pair on this month's buckets and gives the slot no Docker socket):
  * nothing is started and no bucket is touched.
  */
@@ -206,4 +219,107 @@ export async function layers(
   } catch {
     return undefined;
   }
+}
+
+/** Where a run writes `app:tag`: this month's sidecar, or the forge's registry. */
+export function candidateRef(registry: Registry, app: string, tag: string): string {
+  return registry.kind === 'own'
+    ? `localhost:${CURRENT_PORT}/${app}:${tag}`
+    : `${imageName(registry.prefix, app)}:${tag}`;
+}
+
+/** Whether `ref` resolves on a registry crane is logged in to. */
+export async function craneDigest(ctx: Context, ref: string): Promise<string | undefined> {
+  try {
+    return (await ctx.read('crane', ['digest', ref])).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The ref under which the registry holds `app:tag`, either sidecar's under `own`, or undefined. */
+export async function findTag(ctx: Context, registry: Registry, app: string, tag: string): Promise<string | undefined> {
+  if (registry.kind === 'own') {
+    const port = await tagExists(ctx, app, tag);
+    return port === undefined ? undefined : `localhost:${port}/${app}:${tag}`;
+  }
+  const ref = candidateRef(registry, app, tag);
+  return (await craneDigest(ctx, ref)) === undefined ? undefined : ref;
+}
+
+/** The digest of `app:tag` where a run writes, or undefined. */
+export function digestOf(ctx: Context, registry: Registry, app: string, tag: string): Promise<string | undefined> {
+  return registry.kind === 'own' ? digest(ctx, app, tag) : craneDigest(ctx, candidateRef(registry, app, tag));
+}
+
+/** The layers of `app:tag` where a run writes, or undefined. */
+export async function layersOf(
+  ctx: Context,
+  registry: Registry,
+  app: string,
+  tag: string,
+): Promise<Layer[] | undefined> {
+  if (registry.kind === 'own') return layers(ctx, app, tag);
+  try {
+    const data = JSON.parse(await ctx.read('crane', ['manifest', candidateRef(registry, app, tag)])) as {
+      layers?: Layer[];
+    };
+    return (data.layers ?? []).map((l) => ({ digest: l.digest, size: l.size }));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether this machine holds a login for the forge's registry: an entry in
+ * the Docker config crane and docker both read, or a credential store that
+ * answers for it. Read from the file, so that no secret passes through here.
+ */
+export async function loggedIn(ctx: Context, host: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  const file = `${env.DOCKER_CONFIG || `${env.HOME}/.docker`}/config.json`;
+  try {
+    const config = JSON.parse(await ctx.readFile(file)) as {
+      auths?: Record<string, unknown>;
+      credsStore?: string;
+      credHelpers?: Record<string, string>;
+    };
+    return Boolean(config.auths?.[host] || config.credHelpers?.[host] || config.credsStore);
+  } catch {
+    return false;
+  }
+}
+
+export interface Rotation {
+  /** This month's bucket, when it had to be created. */
+  created?: string;
+  /** The bucket from two months ago, when it was still there. */
+  removed?: string;
+}
+
+/**
+ * Retention by rotation: this month's bucket exists, the one from two months
+ * ago is deleted whole. Writes go to the current month, reads consult the
+ * current and the previous, so nothing reads what goes.
+ */
+export async function rotateBuckets(
+  ctx: Context,
+  storage: ObjectStorage,
+  owner: string,
+  zone: string,
+  now = new Date(),
+): Promise<Rotation> {
+  const buckets = registryBuckets(owner, now);
+  const sos = new Storage(ctx, storage.accessKey, storage.secretKey);
+  const result: Rotation = {};
+  if (!(await sos.bucketExists(buckets.current))) {
+    ctx.say(`rotate: creating the bucket ${buckets.current} in ${zone}`);
+    await sos.makeBucket(buckets.current, zone);
+    result.created = buckets.current;
+  }
+  if (await sos.bucketExists(buckets.expired)) {
+    ctx.say(`rotate: the registry bucket ${buckets.expired} is two months old`);
+    await sos.removeBucket(buckets.expired);
+    result.removed = buckets.expired;
+  }
+  return result;
 }

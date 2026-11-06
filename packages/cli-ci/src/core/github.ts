@@ -1,5 +1,5 @@
 // GitHub's self-hosted runner API, through curl: one JIT config registers one
-// runner for exactly one job (ci.md, "Instances"). The token goes to curl as a
+// runner for exactly one job (§ 8 PLX-Delivery). The token goes to curl as a
 // config on stdin (`-K -`), never on argv, where a process listing would show it.
 import type { Context } from '@plexus-ms/lib';
 import { run } from '@plexus-ms/lib';

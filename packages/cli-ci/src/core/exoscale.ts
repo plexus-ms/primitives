@@ -1,6 +1,6 @@
 // The cloud, through the exo CLI's raw API calls (`exo x <operation>`): one
 // operation each, so that a role holds exactly the operations the daily work
-// names (ci.md, "IAM operations"), where the CLI's own commands end in reads
+// names (§ 8 PLX-Delivery), where the CLI's own commands end in reads
 // the roles have no business holding. Reads go through ctx.read, effects
 // through ctx.effect, so a dry run lists them and performs none. The key is
 // in the environment (EXOSCALE_API_KEY, EXOSCALE_API_SECRET), never on argv.
@@ -92,7 +92,7 @@ export class Exo {
   async securityGroupId(name: string): Promise<string> {
     const data = (await this.read('list-security-groups')) as { 'security-groups'?: { id: string; name: string }[] };
     const g = (data['security-groups'] ?? []).find((g) => g.name === name);
-    if (!g) throw new Error(`no security group "${name}"; it is created once, at setup (ci.md)`);
+    if (!g) throw new Error(`no security group "${name}"; it is created once, at setup`);
     return g.id;
   }
 
@@ -129,18 +129,15 @@ export class Exo {
     return this.effect('stop-instance', [id]);
   }
 
-  startInstance(id: string): Promise<Operation | undefined> {
-    return this.effect('start-instance', [id]);
-  }
-
-  rebootInstance(id: string): Promise<Operation | undefined> {
-    return this.effect('reboot-instance', [id]);
+  /** Rename and relabel: the whole label map is sent, since the API replaces it. */
+  updateInstance(id: string, name: string, labels: Record<string, string>): Promise<Operation | undefined> {
+    return this.effect('update-instance', [id], JSON.stringify({ name, labels }));
   }
 }
 
 /**
  * Object storage through `exo storage`, with a key of its own: ci-storage,
- * which is the S3 credential and an Exoscale IAM key at once (ci.md). The key
+ * which is the S3 credential and an Exoscale IAM key at once. The key
  * rides on the step's env, never on argv.
  */
 export class Storage {

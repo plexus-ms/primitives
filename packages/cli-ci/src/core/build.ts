@@ -1,15 +1,18 @@
-// Build one app's image from its pruned context, with the registry sidecars
-// as BuildKit cache and candidate store (ci.md, "Build" and "Reproducible
-// images"). Runs on a throwaway builder in a checkout of the repo, with node
-// and docker on the PATH, and by hand the same way. BuildKit runs as a
-// docker-container builder on the host's network (the docker driver cannot
-// export a registry cache), bootstrapped by the instance's user-data.
+// Build one app's image from its pruned context, with the registry as
+// BuildKit cache and candidate store (§§ 4 and 8 PLX-Delivery). Runs on a
+// large runner, whichever the strategy gives it, in a checkout of the repo
+// with node and docker on the PATH, and by hand the same way. BuildKit runs
+// as a docker-container builder on the machine's network (the docker driver
+// cannot export a registry cache, and localhost:5000 is the sidecar there); a
+// launched instance has bootstrapped it by the time the job starts, anywhere
+// else the build creates it.
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from '@plexus-ms/lib';
 import { run, UsageError } from '@plexus-ms/lib';
-import { answers, CURRENT_PORT, PREVIOUS_PORT } from './registry.ts';
+import { packageName, turboOf } from './plan.ts';
+import { answers, candidateRef, PREVIOUS_PORT, type Registry } from './registry.ts';
 
 export interface BuildOptions {
   app: string;
@@ -24,8 +27,8 @@ export interface BuildOptions {
   noCache?: boolean;
   /** The checkout; default the cwd. */
   dir?: string;
-  /** The npm scope of the workspace packages, `@damage-ms`. */
-  scope: string;
+  /** Where the candidates live. */
+  registry: Registry;
   builder?: string;
 }
 
@@ -38,8 +41,16 @@ export interface Build {
   buildSeconds: number;
 }
 
-export const REGISTRY = `localhost:${CURRENT_PORT}`;
 export const PREVIOUS_REGISTRY = `localhost:${PREVIOUS_PORT}`;
+
+/**
+ * The tags a build pushes: build-<hash> and the extra ones, and the commit
+ * where the candidates have a registry of their own. In the forge's registry
+ * the commit's tag marks a published image, which only `publish` may set.
+ */
+export function tagsOf(options: BuildOptions): string[] {
+  return [`build-${options.hash}`, ...(options.registry.kind === 'own' ? [options.sha] : []), ...(options.tags ?? [])];
+}
 
 /** The `docker buildx build` arguments, so that the tests pin them. */
 export function buildArgs(
@@ -48,9 +59,9 @@ export function buildArgs(
   metadataFile: string,
   previousAnswers: boolean,
 ): string[] {
-  const { app, hash, sha } = options;
-  const ref = (tag: string) => `${REGISTRY}/${app}:${tag}`;
-  const tags = [`build-${hash}`, sha, ...(options.tags ?? [])].flatMap((t) => ['--tag', ref(t)]);
+  const { app } = options;
+  const ref = (tag: string) => candidateRef(options.registry, app, tag);
+  const tags = tagsOf(options).flatMap((t) => ['--tag', ref(t)]);
   const cache = options.noCache
     ? ['--no-cache']
     : [
@@ -71,7 +82,7 @@ export function buildArgs(
     '--build-arg',
     `APP=${app}`,
     '--build-arg',
-    `BUILD_HASH=${hash}`,
+    `BUILD_HASH=${options.hash}`,
     '--secret',
     'id=next-server-actions-encryption-key,env=NEXT_SERVER_ACTIONS_ENCRYPTION_KEY',
     ...cache,
@@ -89,18 +100,42 @@ export function buildArgs(
   ];
 }
 
+/** The builder, created where the machine has none of the name yet. */
+async function ensureBuilder(ctx: Context, name: string): Promise<void> {
+  if (!ctx.dryRun) {
+    try {
+      await ctx.read('docker', ['buildx', 'inspect', name]);
+      return;
+    } catch {}
+  }
+  await ctx.apply([
+    run('docker', [
+      'buildx',
+      'create',
+      '--name',
+      name,
+      '--driver',
+      'docker-container',
+      '--driver-opt',
+      'network=host',
+      '--bootstrap',
+    ]),
+  ]);
+}
+
 export async function build(ctx: Context, options: BuildOptions): Promise<Build> {
   if (!options.encryptionKey) throw new UsageError('NEXT_SERVER_ACTIONS_ENCRYPTION_KEY is empty');
   const dir = options.dir ?? '.';
   const out = join(tmpdir(), `plx-ci-build-${randomBytes(4).toString('hex')}`);
   const context = join(out, 'full');
+  const builder = options.builder ?? 'ci';
   const env = {
     NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: options.encryptionKey,
-    BUILDX_BUILDER: options.builder ?? 'ci',
+    BUILDX_BUILDER: builder,
     SOURCE_DATE_EPOCH: '0',
   };
-  const pkg = JSON.parse(await ctx.readFile(join(dir, 'package.json'))) as { devDependencies?: Record<string, string> };
-  const turbo = pkg.devDependencies?.turbo ?? 'latest';
+  const name = await packageName(ctx, dir, options.app);
+  await ensureBuilder(ctx, builder);
 
   // The pruned context: the app, the workspace packages it uses, a lockfile
   // reduced to them. turbo writes the lockfile beside `full`, and leaves out
@@ -108,7 +143,7 @@ export async function build(ctx: Context, options: BuildOptions): Promise<Build>
   // Dockerfile wants all three.
   let t = Date.now();
   await ctx.apply([
-    run('npx', ['--yes', `turbo@${turbo}`, 'prune', `${options.scope}/${options.app}`, '--docker', '--out-dir', out], {
+    run('npx', ['--yes', await turboOf(ctx, dir), 'prune', name, '--docker', '--out-dir', out], {
       cwd: dir,
     }),
     run('cp', [join(out, 'pnpm-lock.yaml'), join(context, 'pnpm-lock.yaml')]),
@@ -118,21 +153,23 @@ export async function build(ctx: Context, options: BuildOptions): Promise<Build>
   const pruneSeconds = Math.round((Date.now() - t) / 1000);
   ctx.say(`build: prune ${pruneSeconds}s`);
 
-  // The previous month's sidecar exists only when its bucket does.
-  const previousAnswers = ctx.dryRun ? true : await answers(ctx, PREVIOUS_PORT);
-  if (!previousAnswers) ctx.say(`build: no previous-month registry on ${PREVIOUS_REGISTRY}`);
+  // The previous month's sidecar exists only when its bucket does, and only
+  // with a registry of the tenant's own.
+  const previousAnswers = options.registry.kind === 'own' && (ctx.dryRun ? true : await answers(ctx, PREVIOUS_PORT));
+  if (options.registry.kind === 'own' && !previousAnswers)
+    ctx.say(`build: no previous-month registry on ${PREVIOUS_REGISTRY}`);
   const metadataFile = join(out, 'metadata.json');
   t = Date.now();
   await ctx.apply([run('docker', buildArgs(options, context, metadataFile, previousAnswers), { env })]);
   const buildSeconds = Math.round((Date.now() - t) / 1000);
   ctx.say(`build: build${options.noCache ? ' no-cache' : ''} ${buildSeconds}s`);
 
-  const tags = [`build-${options.hash}`, options.sha, ...(options.tags ?? [])];
+  const tags = tagsOf(options);
   const result: Build = { app: options.app, tags, pruneSeconds, buildSeconds };
   if (!ctx.dryRun) {
     const meta = JSON.parse(await ctx.readFile(metadataFile)) as { 'containerimage.digest'?: string };
     result.digest = meta['containerimage.digest'];
-    ctx.say(`build: ${options.app} build-${options.hash} ${options.sha} -> ${result.digest ?? '<no digest>'}`);
+    ctx.say(`build: ${options.app} ${tags.join(' ')} -> ${result.digest ?? '<no digest>'}`);
   }
   await ctx.apply([run('rm', ['-rf', out])]);
   return result;

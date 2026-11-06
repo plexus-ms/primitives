@@ -1,6 +1,6 @@
-// Test one app's candidate image (ci.md, "Test"): on a throwaway test runner,
-// the app's own compose.yaml with the CI override beside it, the candidate
-// pulled from the registry sidecar, `migrate` once, `up --wait`, then the
+// Test one app's candidate image (§ 8 PLX-Delivery): on a large runner, the
+// app's own compose.yaml with the CI override beside it, the candidate
+// pulled from the registry, `migrate` once, `up --wait`, then the
 // app's test script against the running stack, and on success the tag
 // test-<hash> on the very manifest that was tested. The specs run on the
 // runner, outside the containers: the override's `x-plexus-ci.env` says how
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import type { Context } from '@plexus-ms/lib';
 import { run, UsageError } from '@plexus-ms/lib';
 import { parse } from 'yaml';
-import { CURRENT_PORT, digest, tagExists } from './registry.ts';
+import { candidateRef, digestOf, findTag, type Registry } from './registry.ts';
 
 export const OVERRIDE = 'compose.ci.yaml';
 
@@ -24,6 +24,8 @@ export interface TestOptions {
   port?: number;
   /** The checkout; default the cwd. */
   dir?: string;
+  /** Where the candidates live. */
+  registry: Registry;
 }
 
 export interface TestResult {
@@ -64,17 +66,18 @@ export function specEnv(port: number, fromOverride: Record<string, string>): Nod
 }
 
 export async function test(ctx: Context, options: TestOptions): Promise<TestResult> {
-  const { app, hash, build } = options;
+  const { app, hash, build, registry } = options;
   const dir = options.dir ?? '.';
   const port = options.port ?? 3000;
   const appDir = join(dir, 'apps', app);
   const composeDir = join(appDir, 'docker');
   const project = `ci-${app}`;
 
-  const registryPort = (await tagExists(ctx, app, `build-${build}`)) ?? (ctx.dryRun ? CURRENT_PORT : undefined);
-  if (registryPort === undefined)
+  const image =
+    (await findTag(ctx, registry, app, `build-${build}`)) ??
+    (ctx.dryRun ? candidateRef(registry, app, `build-${build}`) : undefined);
+  if (image === undefined)
     throw new Error(`${app}:build-${build} is in no registry here; the build failed or never ran`);
-  const image = `localhost:${registryPort}/${app}:build-${build}`;
   const tag = `test-${hash}`;
 
   const fromOverride = overrideEnv(await ctx.readFile(join(composeDir, OVERRIDE)));
@@ -117,11 +120,11 @@ export async function test(ctx: Context, options: TestOptions): Promise<TestResu
   // The tag goes on the manifest that was tested, copied into this month's
   // registry when the candidate came from the previous one.
   await ctx.apply([
-    run('docker', ['buildx', 'imagetools', 'create', '--tag', `localhost:${CURRENT_PORT}/${app}:${tag}`, image]),
+    run('docker', ['buildx', 'imagetools', 'create', '--tag', candidateRef(registry, app, tag), image]),
   ]);
   const result: TestResult = { app, hash, image, tag, stackSeconds, testSeconds };
   if (!ctx.dryRun) {
-    result.digest = await digest(ctx, app, tag);
+    result.digest = await digestOf(ctx, registry, app, tag);
     ctx.say(`test: ${app} ${tag} -> ${result.digest ?? '<no digest>'}`);
   }
   return result;

@@ -31,3 +31,21 @@ test('help lists the global options', () => {
   for (const flag of ['--dry-run', '--verbose', '--quiet', '--yes', '--json', '--version'])
     assert.match(help, new RegExp(flag));
 });
+
+test('the universal commands take --strategy, and hybrid holds the instances’ three', () => {
+  const program = buildProgram();
+  const names = program.commands.map((c) => c.name());
+  assert.deepEqual(names, ['registry', 'plan', 'build', 'test', 'publish', 'report', 'hybrid']);
+  for (const name of ['registry', 'plan', 'build', 'test', 'publish', 'report']) {
+    const command = program.commands.find((c) => c.name() === name);
+    assert.ok(
+      command?.options.some((o) => o.long === '--strategy'),
+      `${name} takes --strategy`,
+    );
+  }
+  const hybrid = program.commands.find((c) => c.name() === 'hybrid');
+  assert.deepEqual(
+    hybrid?.commands.map((c) => c.name()),
+    ['create-instances', 'destroy-instances', 'sweep-instances'],
+  );
+});

@@ -43,8 +43,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from './context.ts';
 import { DEFAULT_ENVIRONMENT, deploymentSlug } from './deployTargets.ts';
-import { ExecError } from './io.ts';
 import { run } from './effects.ts';
+import { ExecError } from './io.ts';
 import { UsageError } from './train.ts';
 
 export interface DeployOptions {

@@ -1,15 +1,17 @@
-// The plan of a run (ci.md, "Plan"): for every app, the build and the test
-// hash from one Turbo dry run, a look-up in the registry, and one builder per
-// app whose image is missing (two without cache in repro mode) and one test
-// runner per app whose test tag is missing, launched at once. The result is
-// the matrices the build and the test jobs fan out over, the apps with their
-// hashes for the release, and the id of an instance kept for inspection, if any.
-import type { Context } from '@plexus-ms/lib';
+// The plan of a run (§ 8 PLX-Delivery): for every app, the build and the test
+// hash from one Turbo dry run and a look-up in the registry, which leaves one
+// build leg per app whose image is missing (two without cache in repro mode)
+// and one test leg per app whose test tag is missing. Each leg names the
+// runner its job asks for, from the strategy: the forge's, a large slot, or,
+// under hybrid, the one label of an instance `hybrid create-instances` then
+// creates for it. With a deploy asked for, the plan also says which
+// environment the run releases into and where each app deploys there, from
+// the platform repo's inventory. The plan decides and launches nothing: its
+// result is the matrices the jobs fan out over.
+import type { Context, EnvironmentTargets } from '@plexus-ms/lib';
 import { UsageError } from '@plexus-ms/lib';
-import type { Exo } from './exoscale.ts';
-import type { GitHubRunners } from './github.ts';
-import { type LaunchOptions, launch } from './launch.ts';
-import { digest, layers, tagExists } from './registry.ts';
+import { digestOf, findTag, imageName, layersOf, type Registry } from './registry.ts';
+import { runnerOf, type Strategy } from './strategy.ts';
 
 export type Mode = 'build' | 'force' | 'repro';
 
@@ -23,145 +25,197 @@ export interface Hash {
 /** Turbo's marker for a task whose script the package does not define. */
 const NONEXISTENT = '<NONEXISTENT>';
 
-/** The build and test hashes from Turbo's dry run (`turbo run build test --dry-run=json`), per app package. */
-export function hashesOf(dryRun: string, scope: string): Hash[] {
+/** The build and test hashes from Turbo's dry run (`turbo run build test --dry-run=json`), per app, by its package's name. */
+export function hashesOf(dryRun: string, packages: Record<string, string>): Hash[] {
   const data = JSON.parse(dryRun) as {
     tasks?: { taskId: string; package: string; hash: string; command?: string }[];
   };
-  const tasks = (data.tasks ?? []).filter((t) => t.package.startsWith(`${scope}/`) && t.command !== NONEXISTENT);
-  const app = (t: { package: string }) => t.package.slice(scope.length + 1);
-  return tasks
-    .filter((t) => t.taskId.endsWith('#build'))
-    .map((b) => {
-      const test = tasks.find((t) => t.package === b.package && t.taskId.endsWith('#test'));
-      return { app: app(b), hash: b.hash, ...(test ? { test: test.hash } : {}) };
-    });
+  const tasks = (data.tasks ?? []).filter((t) => t.command !== NONEXISTENT);
+  return Object.entries(packages).flatMap(([app, name]) => {
+    const build = tasks.find((t) => t.package === name && t.taskId.endsWith('#build'));
+    if (!build) return [];
+    const test = tasks.find((t) => t.package === name && t.taskId.endsWith('#test'));
+    return [{ app, hash: build.hash, ...(test ? { test: test.hash } : {}) }];
+  });
 }
 
-export async function readHashes(ctx: Context, dir: string, scope: string): Promise<Hash[]> {
+/** The name of an app's package, `apps/<app>/package.json`: what Turbo calls it. */
+export async function packageName(ctx: Context, dir: string, app: string): Promise<string> {
+  const pkg = JSON.parse(await ctx.readFile(`${dir}/apps/${app}/package.json`)) as { name?: string };
+  if (!pkg.name) throw new UsageError(`apps/${app}/package.json has no name`);
+  return pkg.name;
+}
+
+/** Turbo at the version the repo's root pins. */
+export async function turboOf(ctx: Context, dir: string): Promise<string> {
   const pkg = JSON.parse(await ctx.readFile(`${dir}/package.json`)) as { devDependencies?: Record<string, string> };
-  const turbo = pkg.devDependencies?.turbo ?? 'latest';
-  const out = await ctx.read('npx', ['--yes', `turbo@${turbo}`, 'run', 'build', 'test', '--dry-run=json'], {
+  return `turbo@${pkg.devDependencies?.turbo ?? 'latest'}`;
+}
+
+export async function readHashes(ctx: Context, dir: string, apps: string[]): Promise<Hash[]> {
+  const packages: Record<string, string> = {};
+  for (const app of apps) packages[app] = await packageName(ctx, dir, app);
+  const out = await ctx.read('npx', ['--yes', await turboOf(ctx, dir), 'run', 'build', 'test', '--dry-run=json'], {
     cwd: dir,
   });
-  return hashesOf(out, scope);
+  return hashesOf(out, packages);
 }
 
-/** A build job: one app, its build hash, the runner label it asks for. */
+/** The run a plan is for; names the instances under hybrid. */
+export interface Run {
+  runId: string;
+  attempt: string;
+}
+
+/** A build job: one app, its build hash, the runner it asks for. */
 export interface Leg {
   app: string;
   hash: string;
-  label: string;
+  runner: string;
   n: number;
 }
 
-/** A test job: one app, its test hash, the build it tests, the runner label it asks for. */
+/** A test job: one app, its test hash, the build it tests, the runner it asks for. */
 export interface TestLeg {
   app: string;
   hash: string;
   build: string;
-  label: string;
+  runner: string;
 }
 
-/** The legs a mode asks for, before the registry is consulted. */
-export function legsOf(apps: string[], hashes: Hash[], mode: Mode, runId: string, attempt: string): Leg[] {
+/** A deploy job: one app, where it deploys in the run's environment, and the image the release publishes. */
+export interface DeployLeg {
+  app: string;
+  host: string;
+  image: string;
+}
+
+/** The build legs a mode asks for, before the registry is consulted. */
+export function legsOf(apps: string[], hashes: Hash[], mode: Mode, strategy: Strategy, run: Run): Leg[] {
   return apps.flatMap((app) => {
     const hash = hashes.find((h) => h.app === app)?.hash;
     if (!hash) throw new UsageError(`no build hash for ${app}; is it an app package of the workspace?`);
     const copies = mode === 'repro' ? 2 : 1;
     return Array.from({ length: copies }, (_, i) => {
       const n = i + 1;
-      const base = `exo-build-${runId}-${app}-${attempt}`;
-      return { app, hash, label: mode === 'repro' ? `${base}-${n}` : base, n };
+      const base = `exo-build-${run.runId}-${app}-${run.attempt}`;
+      return { app, hash, runner: runnerOf(strategy, 'large', mode === 'repro' ? `${base}-${n}` : base), n };
     });
   });
 }
 
 /** The test legs: one per app that has a test task. */
-export function testLegsOf(apps: string[], hashes: Hash[], runId: string, attempt: string): TestLeg[] {
+export function testLegsOf(apps: string[], hashes: Hash[], strategy: Strategy, run: Run): TestLeg[] {
   return apps.flatMap((app) => {
     const h = hashes.find((x) => x.app === app);
     if (!h?.test) return [];
-    return [{ app, hash: h.test, build: h.hash, label: `exo-test-${runId}-${app}-${attempt}` }];
+    const runner = runnerOf(strategy, 'large', `exo-test-${run.runId}-${app}-${run.attempt}`);
+    return [{ app, hash: h.test, build: h.hash, runner }];
   });
 }
 
+/**
+ * The environment a run releases into (§ 3 PLX-Delivery): `given` when the
+ * caller stands in for an environment branch, else main is production and
+ * develop is staging, on a push or a run by hand; anything else, a pull
+ * request among it, releases nowhere.
+ */
+export function environmentOf(event: string, ref: string, given = ''): string {
+  if (given) return given;
+  if (event !== 'push' && event !== 'workflow_dispatch') return '';
+  return ref === 'main' ? 'production' : ref === 'develop' ? 'staging' : '';
+}
+
+/** The deploy legs: one per planned app with a target in the environment; the rest have no deployment there. */
+export function deployLegsOf(
+  apps: string[],
+  targets: EnvironmentTargets,
+  prefix: string,
+  sha: string,
+): { legs: DeployLeg[]; without: string[] } {
+  const legs: DeployLeg[] = [];
+  const without: string[] = [];
+  for (const app of apps) {
+    const host = targets[app];
+    if (host === undefined) without.push(app);
+    else legs.push({ app, host, image: `${imageName(prefix, app)}:${sha}` });
+  }
+  return { legs, without };
+}
+
 export interface Plan {
+  /** The builds to run. */
   legs: Leg[];
+  /** The tests to run. */
   tests: TestLeg[];
-  /** Every app planned, with its hashes: what the release and the deploy fan out over. */
+  /** Every app planned, with its hashes: what the publish fans out over. */
   apps: Hash[];
-  skipped: { app: string; hash: string; port: number }[];
-  skippedTests: { app: string; hash: string; port: number }[];
-  kept?: string;
+  /** The environment the run releases into, empty for none. */
+  environment: string;
+  /** The deploys of the release, empty without an environment. */
+  deploys: DeployLeg[];
+  skipped: { app: string; hash: string; ref: string }[];
+  skippedTests: { app: string; hash: string; ref: string }[];
 }
 
 export interface PlanOptions {
   apps: string[];
   mode: Mode;
-  /** Plan test runners too (the pipeline); off for the build measurements. */
+  /** Plan tests too; off for the build measurements. */
   tests?: boolean;
   hashes: Hash[];
-  /** The launch options every leg shares; label and app are set per leg. */
-  launch: Omit<LaunchOptions, 'label' | 'app' | 'kind'>;
+  strategy: Strategy;
+  registry: Registry;
+  run: Run;
+  /** With a deploy asked for: the environment, its targets, and what names the published image. */
+  deploy?: { environment: string; targets: EnvironmentTargets; prefix: string; sha: string };
 }
 
-export async function plan(ctx: Context, exo: Exo, github: GitHubRunners, options: PlanOptions): Promise<Plan> {
-  const { runId, attempt } = options.launch.run;
+export async function plan(ctx: Context, options: PlanOptions): Promise<Plan> {
+  const { apps, hashes, mode, strategy, registry, run } = options;
   const result: Plan = {
     legs: [],
     tests: [],
-    apps: options.apps.map((app) => {
-      const h = options.hashes.find((x) => x.app === app);
+    apps: apps.map((app) => {
+      const h = hashes.find((x) => x.app === app);
       if (!h) throw new UsageError(`no build hash for ${app}; is it an app package of the workspace?`);
       return h;
     }),
+    environment: options.deploy?.environment ?? '',
+    deploys: [],
     skipped: [],
     skippedTests: [],
   };
-  const builds: Leg[] = [];
-  for (const leg of legsOf(options.apps, options.hashes, options.mode, runId, attempt)) {
-    if (options.mode === 'build') {
-      const port = await tagExists(ctx, leg.app, `build-${leg.hash}`);
-      if (port !== undefined) {
-        ctx.say(`${leg.app}: build-${leg.hash} exists in the registry on :${port}, nothing to build`);
-        result.skipped.push({ app: leg.app, hash: leg.hash, port });
+  for (const leg of legsOf(apps, hashes, mode, strategy, run)) {
+    if (mode === 'build') {
+      const ref = await findTag(ctx, registry, leg.app, `build-${leg.hash}`);
+      if (ref !== undefined) {
+        ctx.say(`${leg.app}: ${ref} exists, nothing to build`);
+        result.skipped.push({ app: leg.app, hash: leg.hash, ref });
         continue;
       }
     }
-    builds.push(leg);
+    result.legs.push(leg);
   }
-  const tests: TestLeg[] = [];
-  if (options.tests && options.mode !== 'repro') {
-    for (const leg of testLegsOf(options.apps, options.hashes, runId, attempt)) {
-      if (options.mode === 'build') {
-        const port = await tagExists(ctx, leg.app, `test-${leg.hash}`);
-        if (port !== undefined) {
-          ctx.say(`${leg.app}: test-${leg.hash} exists in the registry on :${port}, nothing to test`);
-          result.skippedTests.push({ app: leg.app, hash: leg.hash, port });
+  if (options.tests && mode !== 'repro') {
+    for (const leg of testLegsOf(apps, hashes, strategy, run)) {
+      if (mode === 'build') {
+        const ref = await findTag(ctx, registry, leg.app, `test-${leg.hash}`);
+        if (ref !== undefined) {
+          ctx.say(`${leg.app}: ${ref} exists, nothing to test`);
+          result.skippedTests.push({ app: leg.app, hash: leg.hash, ref });
           continue;
         }
       }
-      tests.push(leg);
+      result.tests.push(leg);
     }
   }
-  // At once: each launch waits for its runner, and the waits overlap.
-  const launches = await Promise.allSettled([
-    ...builds.map((leg) =>
-      launch(ctx, exo, github, { ...options.launch, kind: 'build', label: leg.label, app: leg.app }),
-    ),
-    ...tests.map((leg) =>
-      launch(ctx, exo, github, { ...options.launch, kind: 'test', label: leg.label, app: leg.app }),
-    ),
-  ]);
-  const failed = launches.filter((l) => l.status === 'rejected');
-  for (const l of launches) if (l.status === 'fulfilled' && l.value.kept) result.kept = l.value.kept;
-  if (failed.length > 0) {
-    for (const f of failed) ctx.say(`✗ ${f.reason instanceof Error ? f.reason.message : String(f.reason)}`);
-    throw new Error(`${failed.length} launch(es) failed`);
+  if (options.deploy?.environment) {
+    const { environment, targets, prefix, sha } = options.deploy;
+    const { legs, without } = deployLegsOf(apps, targets, prefix, sha);
+    result.deploys = legs;
+    for (const app of without) ctx.say(`${app} has no deployment in ${environment}; nothing to deploy`);
   }
-  result.legs = builds;
-  result.tests = tests;
   return result;
 }
 
@@ -174,22 +228,31 @@ export interface Comparison {
 }
 
 /** What the registry holds after a run: every app's digest, and in repro mode the two builds compared layer by layer. */
-export async function report(ctx: Context, legs: Leg[], mode: Mode, runId: string): Promise<Comparison[]> {
+export async function report(
+  ctx: Context,
+  registry: Registry,
+  legs: Leg[],
+  mode: Mode,
+  runId: string,
+): Promise<Comparison[]> {
   const apps = [...new Set(legs.map((l) => l.app))].sort();
   const out: Comparison[] = [];
   for (const app of apps) {
     const hash = legs.find((l) => l.app === app)?.hash ?? '';
-    const c: Comparison = { app, hash, digest: await digest(ctx, app, `build-${hash}`) };
+    const c: Comparison = { app, hash, digest: await digestOf(ctx, registry, app, `build-${hash}`) };
     ctx.say(`${app} build-${hash}: ${c.digest ?? 'missing'}`);
     if (mode === 'repro') {
       const [one, two] = await Promise.all([
-        digest(ctx, app, `repro-${runId}-1`),
-        digest(ctx, app, `repro-${runId}-2`),
+        digestOf(ctx, registry, app, `repro-${runId}-1`),
+        digestOf(ctx, registry, app, `repro-${runId}-2`),
       ]);
       const identical = one !== undefined && one === two;
       const [l1, l2] = identical
         ? [[], []]
-        : await Promise.all([layers(ctx, app, `repro-${runId}-1`), layers(ctx, app, `repro-${runId}-2`)]);
+        : await Promise.all([
+            layersOf(ctx, registry, app, `repro-${runId}-1`),
+            layersOf(ctx, registry, app, `repro-${runId}-2`),
+          ]);
       const differing: string[] = [];
       const a = l1 ?? [];
       const b = l2 ?? [];

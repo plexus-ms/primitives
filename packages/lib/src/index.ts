@@ -55,6 +55,7 @@ export {
   targetsIn,
 } from './deployTargets.ts';
 export { compareTrains, type Diagnosis, diagnose, type Report } from './doctor.ts';
+export { body, describe, type Plan, run, type Step, write } from './effects.ts';
 export { frontmatterField, setFrontmatterField } from './frontmatter.ts';
 export { type DirEntry, ExecError, type ExecOptions, type Io, realIo, render } from './io.ts';
 export { type Declaration, MARKER_FILE, parseMarker, splitFrontmatter } from './marker.ts';
@@ -68,7 +69,6 @@ export {
   type TemplateFacet,
 } from './model.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';
-export { body, describe, type Plan, run, type Step, write } from './effects.ts';
 export { isClean, propagate, type Summary } from './propagate.ts';
 export {
   type CompendiumCheck,

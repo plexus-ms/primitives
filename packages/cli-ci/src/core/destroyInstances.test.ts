@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { repoLabel, selectRunInstances, selectRunRegistrations } from './destroyInstances.ts';
 import type { Instance } from './exoscale.ts';
-import { repoLabel, selectRunInstances, selectRunRegistrations } from './teardown.ts';
 
 const run = { repo: 'damage-ms/web', runId: '41836428433', attempt: '1' };
 const instance = (name: string, labels: Record<string, string>): Instance => ({
@@ -16,14 +16,14 @@ test('the repo label replaces the slash', () => {
   assert.equal(repoLabel('damage-ms/web'), 'damage-ms-web');
 });
 
-test('selectRunInstances takes this run and attempt, spares kept ids, and ignores other runs and unlabelled instances', () => {
+test('selectRunInstances takes this run and attempt, spares kept instances, and ignores other runs and unlabelled instances', () => {
   const mine = instance('exo-build-41836428433-website-1-1', {});
-  const kept = instance('exo-build-41836428433-website-1-2', {});
+  const kept = instance('exo-build-41836428433-website-1-kept', { kept: '2026-11-04T13:17:00Z' });
   const other = instance('exo-build-1-website-1', { run: '1' });
   const attempt2 = instance('exo-build-41836428433-website-2', { attempt: '2' });
   const foreign: Instance = { ...instance('davids-test', {}), labels: {} };
   assert.deepEqual(
-    selectRunInstances([mine, kept, other, attempt2, foreign], run, [kept.id]).map((i) => i.name),
+    selectRunInstances([mine, kept, other, attempt2, foreign], run).map((i) => i.name),
     [mine.name],
   );
 });

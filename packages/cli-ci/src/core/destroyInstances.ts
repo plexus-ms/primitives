@@ -1,10 +1,11 @@
-// Layer 3 (ci.md, "Instances"): the workflow's own teardown, run by a job that
-// needs every job an instance was launched for and runs whatever they ended
-// in. Deletes every plexus-ci instance in the zone that this run and attempt
-// launched, except those kept for inspection, and removes the runner
-// registrations those instances never used. The instance's own layers stay as
-// they are: this is for the cases the workflow sees and they do not, a build
-// that failed before the runner exited cleanly, a runner that never came online.
+// The run's own cleanup (§ 8 PLX-Delivery, the hybrid strategy), by a job
+// that needs every job an instance was created for and runs whatever they
+// ended in. Deletes every plexus-ci instance in the zone that this run and
+// attempt created, except those kept after a missed boot, and removes the
+// runner registrations those instances never used. The instance's own layers
+// stay as they are: this is for the cases the workflow sees and they do not, a
+// build that failed before the runner exited cleanly, a runner that never
+// came online.
 import type { Context } from '@plexus-ms/lib';
 import type { Exo, Instance } from './exoscale.ts';
 import type { GitHubRunners, Runner } from './github.ts';
@@ -19,15 +20,18 @@ export interface RunIdentity {
 /** The label `repo` carries, `owner-repo`. */
 export const repoLabel = (repo: string): string => repo.replace('/', '-');
 
-/** The instances this run and attempt launched, kept ones left out. */
-export function selectRunInstances(instances: Instance[], run: RunIdentity, keep: string[] = []): Instance[] {
+/** The label a kept instance carries, its value the time it was kept (createInstances.ts); the cleanup and the sweep spare it. */
+export const KEPT_LABEL = 'kept';
+
+/** The instances this run and attempt created, kept ones left out. */
+export function selectRunInstances(instances: Instance[], run: RunIdentity): Instance[] {
   return instances.filter(
     (i) =>
       i.labels['plexus-ci'] === 'true' &&
       i.labels.repo === repoLabel(run.repo) &&
       i.labels.run === run.runId &&
       i.labels.attempt === run.attempt &&
-      !keep.includes(i.id),
+      i.labels[KEPT_LABEL] === undefined,
   );
 }
 
@@ -37,28 +41,35 @@ export function selectRunRegistrations(runners: Runner[], run: RunIdentity): Run
   return runners.filter((r) => !r.busy && pattern.test(r.name));
 }
 
-export interface Teardown {
+export interface Destroyed {
   instances: string[];
   kept: string[];
   registrations: string[];
 }
 
-export async function teardown(
+export async function destroyInstances(
   ctx: Context,
   exo: Exo,
   github: GitHubRunners | undefined,
   run: RunIdentity,
-  keep: string[] = [],
-): Promise<Teardown> {
+): Promise<Destroyed> {
   const all = await exo.listInstances();
-  const mine = selectRunInstances(all, run, keep);
-  const kept = all.filter((i) => keep.includes(i.id)).map((i) => i.name);
-  for (const name of kept) ctx.say(`${name}: kept for inspection`);
+  const mine = selectRunInstances(all, run);
+  const kept = all
+    .filter(
+      (i) =>
+        i.labels['plexus-ci'] === 'true' &&
+        i.labels[KEPT_LABEL] !== undefined &&
+        i.labels.repo === repoLabel(run.repo) &&
+        i.labels.run === run.runId,
+    )
+    .map((i) => i.name);
+  for (const name of kept) ctx.say(`${name}: kept after a missed boot, left alone`);
   for (const i of mine) {
     ctx.say(`${i.name} (${i.id}): ${i.state}`);
     await exo.deleteInstance(i.id);
   }
-  ctx.say(`teardown: ${mine.length} instance(s) of run ${run.runId} attempt ${run.attempt}`);
+  ctx.say(`destroy-instances: ${mine.length} instance(s) of run ${run.runId} attempt ${run.attempt}`);
   const registrations: string[] = [];
   if (github) {
     // A JIT registration stays listed when no job consumed it, online while
@@ -69,7 +80,7 @@ export async function teardown(
       await github.deleteRunner(r.id);
       registrations.push(r.name);
     }
-    ctx.say(`teardown: ${registrations.length} registration(s) removed`);
+    ctx.say(`destroy-instances: ${registrations.length} registration(s) removed`);
   }
   return { instances: mine.map((i) => i.name), kept, registrations };
 }

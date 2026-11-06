@@ -1,7 +1,7 @@
 // The clock, in one place: deadlines as absolute UTC times (what the instance
-// labels and the sweep compare), and the registry's month names (ci.md, "The
-// registry": writes to this month's bucket, reads this and the previous, the
-// one before is deleted whole). Pure, so that the tests pin the arithmetic.
+// labels and the sweep compare), and the registry's month names (§ 8
+// PLX-Delivery: writes to this month's bucket, reads this and the previous,
+// the one before is deleted whole). Pure, so that the tests pin the arithmetic.
 
 /** `2026-11-04T10:40:27Z`, the shape every label and log line uses. */
 export function iso(at: Date): string {

@@ -14,8 +14,9 @@
 // the verb knows the whole of what it is about to do. Narration goes to
 // stderr, results to stdout, so `plx <verb> | ...` composes like the script
 // it replaces. Conventions: compendium/miscellaneous/cli-design.md.
-import { type DirEntry, type ExecOptions, type Io, realIo } from './io.ts';
+
 import { body, describe, type Plan, type Step } from './effects.ts';
+import { type DirEntry, type ExecOptions, type Io, realIo } from './io.ts';
 
 export interface Options {
   dryRun?: boolean;
