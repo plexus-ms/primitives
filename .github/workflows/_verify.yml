@@ -1,12 +1,12 @@
-name: _on-pr
+name: _verify
 
-# The verify phase of an app repo (§§ 2 and 8 PLX-Delivery), mounted on a
-# pull request by the tenant's on_pr.yml, and as the first half of a release
-# by _on-release.yml: one unit for the whole repo and run. The logic is
-# plx-ci's (@plexus-ms/cli-ci, pinned in the caller's mise.toml); every step
-# here is one invocation.
+# Mounts `verify` for an app repo (§§ 1, 2 and 8 PLX-Delivery): build every
+# app's image and test it, for the whole repo and run. The tenant's on_pr.yml
+# and on_push.yml run it after _check.yml, which gates it: a commit that
+# fails the check builds and launches nothing. The logic is plx-ci's
+# (@plexus-ms/cli-ci, pinned in the caller's mise.toml); every step here is
+# one invocation.
 #
-#   check     medium  lint, typecheck and the pure tests, repo-wide; gates everything after it
 #   plan      small   the build and test hashes from one Turbo dry run, the look-ups, the
 #                     matrices; under hybrid, one instance per image to build and test to run
 #   build     large   the image from the pruned context, pushed to the registry as build-<hash>
@@ -48,7 +48,7 @@ on:
         type: string
         default: ghcr
       deploy:
-        description: Plan the deploys too (the release's first half); a pull request deploys nowhere.
+        description: Plan the deploys too, for the release that follows on an environment branch; a pull request deploys nowhere.
         required: false
         type: boolean
         default: false
@@ -95,10 +95,10 @@ on:
         required: true
     outputs:
       apps:
-        description: Every app planned, with its hashes, JSON; what a publish fans out over.
+        description: Every app planned, with its hashes, JSON; what _release.yml publishes.
         value: ${{ jobs.plan.outputs.apps }}
       deploys:
-        description: With `deploy`, the deploys of the release, JSON; `[]` without an environment.
+        description: With `deploy`, the deploys of the release, JSON, for _release.yml; `[]` without an environment.
         value: ${{ jobs.plan.outputs.deploys }}
       environment:
         description: With `deploy`, the environment the run releases into; empty for none.
@@ -119,17 +119,7 @@ env:
   IMAGE_PREFIX: ${{ inputs.image-prefix || format('ghcr.io/{0}', github.repository_owner) }}
 
 jobs:
-  check:
-    uses: ./.github/workflows/_check.yml
-    with:
-      strategy: ${{ inputs.strategy }}
-      turbo-cache: ${{ inputs.registry == 'own' }}
-      vault: ${{ inputs.vault }}
-    secrets:
-      op-service-account-token: ${{ secrets.op-service-account-token }}
-
   plan:
-    needs: check
     runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -198,10 +188,17 @@ jobs:
           MAIL_FROM: op://${{ env.VAULT }}/smtp-relay/from
       # Into the job's home, not /usr/local: a small or medium slot of a runner
       # host (ci_runner_host) runs with no-new-privileges, so sudo is no option.
-      - name: Install exo and crane
+      - name: Install exo
+        if: ${{ inputs.strategy == 'hybrid' }}
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
+      # Into the job's home, not /usr/local: a small or medium slot of a runner
+      # host (ci_runner_host) runs with no-new-privileges, so sudo is no option.
+      - name: Install crane
+        if: ${{ inputs.registry == 'ghcr' }}
+        run: |
+          mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz -C "$HOME/.local/bin" crane
       - name: Log in to the forge's registry
         if: ${{ inputs.registry == 'ghcr' }}
@@ -308,11 +305,6 @@ jobs:
           REGISTRY_REGION: op://${{ env.VAULT }}/bucket-registry/region
           REGISTRY_ACCESS_KEY: op://${{ env.VAULT }}/bucket-registry/access-key-id
           REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
-      - name: Install exo
-        if: ${{ inputs.registry == 'own' && inputs.strategy != 'hybrid' }}
-        run: |
-          mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
       - name: Log in to the forge's registry
         if: ${{ inputs.registry == 'ghcr' }}
         env:
@@ -367,11 +359,6 @@ jobs:
           REGISTRY_REGION: op://${{ env.VAULT }}/bucket-registry/region
           REGISTRY_ACCESS_KEY: op://${{ env.VAULT }}/bucket-registry/access-key-id
           REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
-      - name: Install exo
-        if: ${{ inputs.registry == 'own' && inputs.strategy != 'hybrid' }}
-        run: |
-          mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
       - name: Log in to the forge's registry
         if: ${{ inputs.registry == 'ghcr' }}
         env:
@@ -445,11 +432,10 @@ jobs:
           permission-administration: write
       # Into the job's home, not /usr/local: a small or medium slot of a runner
       # host (ci_runner_host) runs with no-new-privileges, so sudo is no option.
-      - name: Install exo and crane
+      - name: Install exo
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz -C "$HOME/.local/bin" crane
       - name: Delete what this run launched
         env:
           RUNNER_TOKEN: ${{ steps.runners.outputs.token }}

@@ -12,7 +12,8 @@
 // reach it.
 import type { Context } from '@plexus-ms/lib';
 import { run } from '@plexus-ms/lib';
-import { Storage, sleep } from './exoscale.ts';
+import { sleep } from './exoscale.ts';
+import { type ObjectStorage, S3 } from './s3.ts';
 import type { RegistryKind } from './strategy.ts';
 import { registryBuckets } from './time.ts';
 
@@ -25,12 +26,7 @@ export function registryOf(kind: RegistryKind, prefix: string): Registry {
   return kind === 'own' ? { kind } : { kind, prefix };
 }
 
-export interface ObjectStorage {
-  endpoint: string;
-  region: string;
-  accessKey: string;
-  secretKey: string;
-}
+export type { ObjectStorage };
 
 export const CURRENT_PORT = 5000;
 export const PREVIOUS_PORT = 5001;
@@ -119,7 +115,6 @@ export async function startSidecars(
   ctx: Context,
   storage: ObjectStorage | undefined,
   owner: string,
-  zone: string,
   now = new Date(),
 ): Promise<Sidecars> {
   const buckets = registryBuckets(owner, now);
@@ -130,10 +125,10 @@ export async function startSidecars(
   }
   if (!storage)
     throw new Error('REGISTRY_ENDPOINT, REGISTRY_REGION, REGISTRY_ACCESS_KEY and REGISTRY_SECRET_KEY are needed');
-  const sos = new Storage(ctx, storage.accessKey, storage.secretKey);
-  if (!(await sos.bucketExists(buckets.current))) {
-    ctx.say(`→ creating the bucket ${buckets.current} in ${zone}`);
-    await sos.makeBucket(buckets.current, zone);
+  const s3 = new S3(ctx, storage);
+  if (!(await s3.bucketExists(buckets.current))) {
+    ctx.say(`→ creating the bucket ${buckets.current}`);
+    await s3.makeBucket(buckets.current);
   }
   await ctx.apply([
     run('docker', sidecarArgs('registry', CURRENT_PORT, buckets.current, storage, false)),
@@ -305,20 +300,19 @@ export async function rotateBuckets(
   ctx: Context,
   storage: ObjectStorage,
   owner: string,
-  zone: string,
   now = new Date(),
 ): Promise<Rotation> {
   const buckets = registryBuckets(owner, now);
-  const sos = new Storage(ctx, storage.accessKey, storage.secretKey);
+  const s3 = new S3(ctx, storage);
   const result: Rotation = {};
-  if (!(await sos.bucketExists(buckets.current))) {
-    ctx.say(`rotate: creating the bucket ${buckets.current} in ${zone}`);
-    await sos.makeBucket(buckets.current, zone);
+  if (!(await s3.bucketExists(buckets.current))) {
+    ctx.say(`rotate: creating the bucket ${buckets.current}`);
+    await s3.makeBucket(buckets.current);
     result.created = buckets.current;
   }
-  if (await sos.bucketExists(buckets.expired)) {
+  if (await s3.bucketExists(buckets.expired)) {
     ctx.say(`rotate: the registry bucket ${buckets.expired} is two months old`);
-    await sos.removeBucket(buckets.expired);
+    await s3.removeBucket(buckets.expired);
     result.removed = buckets.expired;
   }
   return result;

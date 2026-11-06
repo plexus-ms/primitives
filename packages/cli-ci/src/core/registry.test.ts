@@ -22,7 +22,7 @@ test('where :5000 answers already, nothing is started and no key is needed', asy
       return '';
     },
   });
-  const sidecars = await startSidecars(new Context({}, io), undefined, 'damage-ms', 'de-fra-1', november);
+  const sidecars = await startSidecars(new Context({}, io), undefined, 'damage-ms', november);
   assert.deepEqual(sidecars, {
     current: 'damage-ms-ci-registry-2026-11',
     previous: 'damage-ms-ci-registry-2026-10',
@@ -34,7 +34,7 @@ test('where :5000 answers already, nothing is started and no key is needed', asy
 test('where nothing answers, the key is needed', async () => {
   const io = fakeIo({}, undefined, { curl: () => undefined });
   await assert.rejects(
-    startSidecars(new Context({}, io), undefined, 'damage-ms', 'de-fra-1', november),
+    startSidecars(new Context({}, io), undefined, 'damage-ms', november),
     /REGISTRY_ENDPOINT, REGISTRY_REGION, REGISTRY_ACCESS_KEY and REGISTRY_SECRET_KEY are needed/,
   );
 });
@@ -74,23 +74,66 @@ test('a login is an entry for the host in the Docker config, or a credential sto
   assert.equal(await loggedIn(new Context({}, fakeIo({})), 'ghcr.io', env), false);
 });
 
-test('rotate creates this month’s bucket when it is missing and removes the one from two months ago', async () => {
+test('rotate creates this month’s bucket when it is missing and removes the one from two months ago, objects first', async () => {
   const calls: string[] = [];
+  let objects = ['docker/registry/v2/a', 'docker/registry/v2/b&c'];
   const io = fakeIo({}, undefined, {
-    exo: (_cwd, args) => {
-      calls.push(args.join(' '));
+    curl: (_cwd, _args, input = '') => {
+      const url = (input.match(/url = "([^"]+)"/)?.[1] ?? '').replace('https://s3.example', '');
+      const method = /^head$/m.test(input) ? 'HEAD' : (input.match(/request = "(\w+)"/)?.[1] ?? '');
+      calls.push(`${method} ${url}`);
+      assert.match(input, /aws-sigv4 = "aws:amz:r1:s3"/);
+      assert.match(input, /user = "k:s"/);
       // 2026-11 is missing, 2026-09 is still there.
-      if (args[1] === 'ls') return args[2]?.endsWith('2026-09') ? '' : undefined;
-      return '';
+      if (method === 'HEAD') return url.endsWith('2026-09') ? '\n200' : '\n404';
+      if (method === 'GET' && url.includes('list-type=2')) {
+        const xml = `<ListBucketResult>${objects.map((k) => `<Contents><Key>${k.replace('&', '&amp;')}</Key></Contents>`).join('')}</ListBucketResult>`;
+        return `${xml}\n200`;
+      }
+      if (method === 'POST') {
+        assert.match(input, /<Key>docker\/registry\/v2\/b&amp;c<\/Key>/);
+        assert.match(input, /Content-MD5: /);
+        objects = [];
+        return '\n200';
+      }
+      if (method === 'GET' && url.includes('uploads='))
+        return '<R><Upload><Key>docker/x y</Key><UploadId>u1</UploadId></Upload></R>\n200';
+      return method === 'DELETE' ? '\n204' : '\n200';
     },
   });
-  const storage = { endpoint: 'e', region: 'r', accessKey: 'k', secretKey: 's' };
-  const result = await rotateBuckets(new Context({}, io), storage, 'damage-ms', 'de-fra-1', november);
+  const storage = { endpoint: 'https://s3.example/', region: 'r1', accessKey: 'k', secretKey: 's' };
+  const result = await rotateBuckets(new Context({}, io), storage, 'damage-ms', november);
   assert.deepEqual(result, { created: 'damage-ms-ci-registry-2026-11', removed: 'damage-ms-ci-registry-2026-09' });
   assert.deepEqual(calls, [
-    'storage ls sos://damage-ms-ci-registry-2026-11',
-    'storage mb sos://damage-ms-ci-registry-2026-11 -z de-fra-1',
-    'storage ls sos://damage-ms-ci-registry-2026-09',
-    'storage rb -r -f sos://damage-ms-ci-registry-2026-09',
+    'HEAD /damage-ms-ci-registry-2026-11',
+    'PUT /damage-ms-ci-registry-2026-11',
+    'HEAD /damage-ms-ci-registry-2026-09',
+    'GET /damage-ms-ci-registry-2026-09?list-type=2&max-keys=1000',
+    'POST /damage-ms-ci-registry-2026-09?delete=',
+    'GET /damage-ms-ci-registry-2026-09?list-type=2&max-keys=1000',
+    'GET /damage-ms-ci-registry-2026-09?uploads=',
+    'DELETE /damage-ms-ci-registry-2026-09/docker/x%20y?uploadId=u1',
+    'DELETE /damage-ms-ci-registry-2026-09',
   ]);
+});
+
+test('a dry run of rotate lists once and deletes nothing; an answer outside 2xx is an error', async () => {
+  const calls: string[] = [];
+  const io = (status: string) =>
+    fakeIo({}, undefined, {
+      curl: (_cwd, _args, input = '') => {
+        const method = /^head$/m.test(input) ? 'HEAD' : (input.match(/request = "(\w+)"/)?.[1] ?? '');
+        calls.push(method);
+        if (method === 'HEAD') return '\n200';
+        if (method === 'GET') return '<R><Contents><Key>a</Key></Contents></R>\n200';
+        return `<Error><Message>no</Message></Error>\n${status}`;
+      },
+    });
+  const storage = { endpoint: 'https://s3.example', region: 'r1', accessKey: 'k', secretKey: 's' };
+  await rotateBuckets(new Context({ dryRun: true }, io('200')), storage, 'damage-ms', november);
+  assert.deepEqual(calls, ['HEAD', 'HEAD', 'GET']);
+  await assert.rejects(
+    rotateBuckets(new Context({}, io('403')), storage, 'damage-ms', november),
+    /deleting 1 objects of damage-ms-ci-registry-2026-09 answered 403/,
+  );
 });

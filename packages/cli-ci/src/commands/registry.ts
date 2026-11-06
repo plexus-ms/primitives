@@ -7,8 +7,8 @@
 // `exists` asks whether a tag is there; `rotate` is the retention, run daily.
 // From the environment: CI_STRATEGY, CI_REGISTRY; for the pair
 // REGISTRY_ENDPOINT, REGISTRY_REGION, REGISTRY_ACCESS_KEY, REGISTRY_SECRET_KEY
-// (the vault item bucket-registry), GITHUB_REPOSITORY (the owner names the
-// buckets), ZONE; for `rotate` under ghcr, GITHUB_TOKEN (the workflow's own,
+// (the vault item bucket-registry: any S3-compatible store), GITHUB_REPOSITORY
+// (the owner names the buckets); for `rotate` under ghcr, GITHUB_TOKEN (the workflow's own,
 // with packages: write), which deletes versions of the packages its repo
 // published: the repo's apps, or the ones named.
 //
@@ -22,7 +22,7 @@ import type { Command } from 'commander';
 import { Packages, packageOf, prune } from '../core/ghcr.ts';
 import { findTag, loggedIn, rotateBuckets, startSidecars, storageFromEnv } from '../core/registry.ts';
 import { contextOf } from '../program.ts';
-import { imagePrefix, need, ownerOf, registryFor, settings, withStrategy, zoneOf } from './shared.ts';
+import { imagePrefix, need, ownerOf, registryFor, settings, withStrategy } from './shared.ts';
 
 export function register(program: Command): void {
   const registry = withStrategy(program.command('registry'))
@@ -39,7 +39,7 @@ export function register(program: Command): void {
         ctx.result(`registry: ${imagePrefix()}, logged in`);
         return;
       }
-      const result = await startSidecars(ctx, storageFromEnv(), ownerOf(need('GITHUB_REPOSITORY')), zoneOf());
+      const result = await startSidecars(ctx, storageFromEnv(), ownerOf(need('GITHUB_REPOSITORY')));
       ctx.result(
         result,
         (r) => `:5000 ${r.current}\n:5001 ${r.previous}${r.previousAnswers ? '' : ' (not answering)'}`,
@@ -83,7 +83,7 @@ export function register(program: Command): void {
       const storage = storageFromEnv();
       if (!storage)
         throw new Error('REGISTRY_ENDPOINT, REGISTRY_REGION, REGISTRY_ACCESS_KEY and REGISTRY_SECRET_KEY are needed');
-      const result = await rotateBuckets(ctx, storage, owner, zoneOf());
+      const result = await rotateBuckets(ctx, storage, owner);
       ctx.result(result, (r) =>
         [...(r.created ? [`created ${r.created}`] : []), ...(r.removed ? [`removed ${r.removed}`] : [])].join('\n'),
       );

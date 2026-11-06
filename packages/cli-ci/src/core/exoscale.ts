@@ -1,4 +1,4 @@
-// The cloud, through the exo CLI's raw API calls (`exo x <operation>`): one
+// The cloud's instances, through the exo CLI's raw API calls (`exo x <operation>`): one
 // operation each, so that a role holds exactly the operations the daily work
 // names (§ 8 PLX-Delivery), where the CLI's own commands end in reads
 // the roles have no business holding. Reads go through ctx.read, effects
@@ -132,38 +132,6 @@ export class Exo {
   /** Rename and relabel: the whole label map is sent, since the API replaces it. */
   updateInstance(id: string, name: string, labels: Record<string, string>): Promise<Operation | undefined> {
     return this.effect('update-instance', [id], JSON.stringify({ name, labels }));
-  }
-}
-
-/**
- * Object storage through `exo storage`, with a key of its own: ci-storage,
- * which is the S3 credential and an Exoscale IAM key at once. The key
- * rides on the step's env, never on argv.
- */
-export class Storage {
-  readonly ctx: Context;
-  readonly env: NodeJS.ProcessEnv;
-
-  constructor(ctx: Context, accessKey: string, secretKey: string) {
-    this.ctx = ctx;
-    this.env = { EXOSCALE_API_KEY: accessKey, EXOSCALE_API_SECRET: secretKey };
-  }
-
-  async bucketExists(bucket: string): Promise<boolean> {
-    try {
-      await this.ctx.read('exo', ['storage', 'ls', `sos://${bucket}`], { env: { ...process.env, ...this.env } });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  makeBucket(bucket: string, zone: string): Promise<void> {
-    return this.ctx.apply([run('exo', ['storage', 'mb', `sos://${bucket}`, '-z', zone], { env: this.env })]);
-  }
-
-  removeBucket(bucket: string): Promise<void> {
-    return this.ctx.apply([run('exo', ['storage', 'rb', '-r', '-f', `sos://${bucket}`], { env: this.env })]);
   }
 }
 

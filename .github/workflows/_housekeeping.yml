@@ -120,10 +120,10 @@ jobs:
           REGISTRY_REGION: op://${{ env.VAULT }}/bucket-registry/region
           REGISTRY_ACCESS_KEY: op://${{ env.VAULT }}/bucket-registry/access-key-id
           REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
-      # Into the job's home, not /usr/local: a small slot of a runner host
-      # (ci_runner_host) runs with no-new-privileges, so sudo is no option.
+      # Into the job's home, not /usr/local: a small or medium slot of a runner
+      # host (ci_runner_host) runs with no-new-privileges, so sudo is no option.
       - name: Install exo
-        if: ${{ inputs.strategy == 'hybrid' || inputs.registry == 'own' }}
+        if: ${{ inputs.strategy == 'hybrid' }}
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo

@@ -1,19 +1,19 @@
-name: _on-release
+name: _release
 
-# A release of an app repo (§§ 2 and 8 PLX-Delivery), mounted on a push to an
-# environment branch by the tenant's on_release.yml: the verify phase a pull
-# request runs (_on-pr.yml: check, plan, build, test), then the release
-# phase.
+# Mounts `release` for an app repo (§§ 1, 2 and 8 PLX-Delivery): publish
+# every app's tested image under its commit and deploy it into the run's
+# environment. The tenant's on_push.yml runs it after _check.yml and
+# _verify.yml on a push to an environment branch, and hands it what the
+# verify planned: the apps, the environment, and where each app deploys.
 #
-#   verify    _on-pr.yml, planning the deploys too
 #   publish   small   the tested manifest under its commit in the forge's registry
 #   deploy    small   _deploy.yml per app with a target in the environment
 #
 # A promotion never builds: a commit whose images the registry holds is
-# published from them and deployed. A newer push to the same branch cancels a
-# verify still going for the older commit, whose verdict nobody waits for;
-# a publish or a deploy once started runs to its end (§ 2 PLX-Delivery).
-# Run by hand on an environment branch, it deploys that branch again.
+# published from them and deployed. Without an environment (a run by hand on
+# a branch that names none) nothing is released. A release once started runs
+# to its end: the caller cancels a superseded check or verify, never this
+# (§ 2 PLX-Delivery).
 
 on:
   workflow_call:
@@ -41,14 +41,18 @@ on:
         required: false
         type: string
         default: none
-      environment:
-        description: >-
-          The environment this run releases into. Empty derives it from the
-          branch (main → production, develop → staging, else none), which is
-          the rule; a caller sets it only to stand in for an environment branch.
-        required: false
+      apps:
+        description: The apps to publish, with their hashes, JSON; _verify.yml's output `apps`.
+        required: true
         type: string
-        default: ''
+      deploys:
+        description: The deploys, JSON; _verify.yml's output `deploys`.
+        required: true
+        type: string
+      environment:
+        description: The environment released into; _verify.yml's output `environment`. Empty releases nothing.
+        required: true
+        type: string
       image-prefix:
         description: Where published images go, `<registry>/<owner>`; the image is `<prefix>/<app>:<sha>`. Default ghcr.io/<owner>.
         required: false
@@ -56,16 +60,6 @@ on:
         default: ''
       vault:
         description: The vault CI reads (§ 3 PLX-Secrets). Default <owner>-ci.
-        required: false
-        type: string
-        default: ''
-      alerts-email:
-        description: Hybrid, the address mailed when an instance misses its boot and is kept; empty for no mail. A preset answer, never a vault item (§ 3 PLX-Secrets).
-        required: false
-        type: string
-        default: ''
-      instance-type:
-        description: Hybrid, the type of the instances; empty for plx-ci's default.
         required: false
         type: string
         default: ''
@@ -90,10 +84,8 @@ on:
 permissions:
   contents: read
   packages: write
-  actions: read
 
 env:
-  EXO_VERSION: 1.103.2
   CRANE_VERSION: 0.22.1
   CI_STRATEGY: ${{ inputs.strategy }}
   CI_REGISTRY: ${{ inputs.registry }}
@@ -102,32 +94,12 @@ env:
   IMAGE_PREFIX: ${{ inputs.image-prefix || format('ghcr.io/{0}', github.repository_owner) }}
 
 jobs:
-  verify:
-    concurrency:
-      group: verify-${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: true
-    uses: ./.github/workflows/_on-pr.yml
-    with:
-      strategy: ${{ inputs.strategy }}
-      registry: ${{ inputs.registry }}
-      deploy: true
-      environment: ${{ inputs.environment }}
-      image-prefix: ${{ inputs.image-prefix }}
-      vault: ${{ inputs.vault }}
-      alerts-email: ${{ inputs.alerts-email }}
-      instance-type: ${{ inputs.instance-type }}
-      primitives-ref: ${{ inputs.primitives-ref }}
-    secrets:
-      op-service-account-token: ${{ secrets.op-service-account-token }}
-
-  # Once the whole verify phase passed, into an environment.
   publish:
-    needs: verify
-    if: ${{ always() && needs.verify.result == 'success' && needs.verify.outputs.environment != '' }}
+    if: ${{ inputs.environment != '' }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.verify.outputs.apps) }}
+        include: ${{ fromJSON(inputs.apps) }}
     runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
     steps:
       - uses: actions/checkout@v7
@@ -164,10 +136,9 @@ jobs:
           REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
       # Into the job's home, not /usr/local: a small or medium slot of a runner
       # host (ci_runner_host) runs with no-new-privileges, so sudo is no option.
-      - name: Install exo and crane
+      - name: Install crane
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
           curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz -C "$HOME/.local/bin" crane
       - name: Log in to the forge's registry
         env:
@@ -183,12 +154,12 @@ jobs:
   # One deploy per app with a target in the environment; an app without a
   # record there has no deployment there, which the plan said.
   deploy:
-    needs: [verify, publish]
-    if: ${{ always() && needs.publish.result == 'success' && needs.verify.outputs.deploys != '[]' }}
+    needs: publish
+    if: ${{ inputs.deploys != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.verify.outputs.deploys) }}
+        include: ${{ fromJSON(inputs.deploys) }}
     uses: ./.github/workflows/_deploy.yml
     with:
       strategy: ${{ inputs.strategy }}
@@ -196,7 +167,7 @@ jobs:
       app: ${{ matrix.app }}
       image-ref: ${{ matrix.image }}
       host: ${{ matrix.host }}
-      environment: ${{ needs.verify.outputs.environment }}
+      environment: ${{ inputs.environment }}
       overlay: ${{ inputs.overlay }}
       vault: ${{ inputs.vault }}
       dry-run: ${{ inputs.dry-run }}
