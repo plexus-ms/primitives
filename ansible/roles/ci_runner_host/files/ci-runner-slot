@@ -1,0 +1,46 @@
+#!/bin/sh
+# Runs the container of one slot for one job (ExecStart of
+# ci-runner@.service). Managed by Ansible (ci_runner_host). The slot's size
+# is the part of its name before the last dash, and decides the container:
+#
+#   small, medium   the host's network (the registry pair on localhost, the
+#                   overlay's names), no Docker socket, no privileges
+#   large           privileged, a network of its own, and a Docker daemon
+#                   inside with its data on a volume removed with the
+#                   container (ci-runner-dind, in the image): the jobs that
+#                   need Docker meet an empty machine
+#
+# From /etc/ci-runner/slot.env: IMAGE and CACHE_DIR; from
+# /etc/ci-runner/size-<size>.env: MEMORY, the container's limit, empty for
+# none. The slot's runner config is /run/ci-runner/<slot>.env, minted by
+# ci-runner-jit before this. Hand-runnable as root, after ci-runner-jit:
+#
+#   ci-runner-jit large-1 && ci-runner-slot large-1
+set -eu
+instance=${1:?the slot, e.g. small-1}
+size=${instance%-*}
+# shellcheck source=/dev/null
+. /etc/ci-runner/slot.env
+MEMORY=
+# shellcheck source=/dev/null
+. "/etc/ci-runner/size-$size.env"
+
+set -- --rm --init --name "ci-runner-$instance" \
+  --env-file "/run/ci-runner/$instance.env" \
+  -e pnpm_config_store_dir=/cache/pnpm-store \
+  -v "$CACHE_DIR/pnpm-store:/cache/pnpm-store"
+[ -z "$MEMORY" ] || set -- "$@" --memory "$MEMORY"
+case "$size" in
+  large)
+    # The daemon inside starts as root and hands over to the runner user;
+    # a privileged container is root on the host already, so the engine's
+    # no-new-privileges buys nothing here and is lifted, which lets a job
+    # install system packages as it would on a machine of its own.
+    set -- "$@" --privileged --security-opt no-new-privileges=false --user 0 \
+      -v /var/lib/docker "$IMAGE" ci-runner-dind
+    ;;
+  *)
+    set -- "$@" --network host "$IMAGE" ./run.sh
+    ;;
+esac
+exec /usr/bin/docker run "$@"

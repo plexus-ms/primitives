@@ -1,0 +1,114 @@
+---
+# A CI runner host of the tenant's own (§ 8 PLX-Delivery), under the on-prem
+# and the hybrid strategy alike: container slots, each a systemd unit that
+# runs one job in a fresh container of the runner image and is started again
+# by systemd when the job ends. A slot is registered just in time: its unit
+# mints a single-use runner config with the tenant's GitHub App before each
+# container, so nothing registered outlives a job and no registration token
+# is ever stored.
+#
+# The slots come in the three sizes the jobs ask for (ci-small, ci-medium,
+# ci-large), and a host carries any number of each: one host with every
+# size, or a host per slot. The strategy decides which sizes a tenant needs:
+# under on-prem all three, under hybrid small and medium, since the large
+# jobs then run on instances the plan launches.
+#
+# A small or medium slot has no Docker socket: its jobs need none, and a
+# socket would be root on this host. It runs with the host's network, so it
+# reaches the registry pair on localhost and the overlay's names the host
+# resolves. A large slot runs the jobs that need Docker (build, test) and
+# has a daemon of its own inside its container, with its data on a volume
+# that goes with the container: the job meets an empty machine, as on a
+# launched instance, takes its layers from the registry, and leaves nothing
+# on the host. That container is privileged, which is root on this host, and
+# has a network of its own, so that the two daemons do not share one. Every
+# slot holds the job's secrets in flight like any runner: one host serves
+# one tenant and runs nothing else (§ 1 PLX-Tenancy).
+#
+# The host needs Docker before this role (install_docker). The role opens no
+# port: the runner polls the forge, and the registry pair listens on loopback.
+# Mount it in the playbook of the cadence the host is on, after install_docker
+# and before configure_firewall.
+
+# Where the slots register: `repo` registers them on one repository (they
+# are then that repository's alone, whatever runner groups the organisation
+# has), `org` at the organisation, in a runner group of it.
+ci_runner_host_scope: repo
+# The repository, owner/name, for scope `repo`.
+ci_runner_host_repo: ""
+# The organisation, for scope `org`; the repository's owner by default.
+ci_runner_host_org: "{{ ci_runner_host_repo.split('/')[0] }}"
+# The runner group, by name, for scope `org`. A group other than Default is
+# a GitHub Team feature; on GitHub Free every private repo of the
+# organisation can use what registers here.
+ci_runner_host_runner_group: Default
+
+# The slots, by size: `small: { count: 4 }` is the units ci-runner@small-1
+# to ci-runner@small-4, each registering with the label ci-small (§ 8
+# PLX-Delivery: plan, publish, deploy, cleanup and housekeeping are small,
+# check is medium, build and test are large). `memory` is the limit of one
+# slot's container, as `docker run --memory` takes it; under it a job is
+# killed rather than the host starved, and for a large slot it covers the
+# daemon inside and everything the job starts there. Empty, or left out,
+# is no limit. A size with count 0, or dropped, stops and disables its units.
+# The sum of count × memory is the host's to afford; one large slot per host
+# is the layout that keeps two builds from contending.
+ci_runner_host_slots:
+  small: { count: 4, memory: 2g }
+  medium: { count: 1, memory: 8g }
+  large: { count: 0, memory: 16g }
+# Labels every slot carries besides its size.
+ci_runner_host_extra_labels: []
+
+# The runner image, one for every size, built upstream in
+# plexus-ms/primitives from this role's files/ci-runner by runner-image.yml,
+# with provenance. The tag is the train's to write, never the update bot's; a host trying an unreleased image
+# overrides it with `…:sha-<commit>` from a manual run of runner-image.yml,
+# or builds it (below). A new pin reaches each slot when its current
+# container ends; `systemctl restart ci-runner@<slot>` takes it at once,
+# cutting off a job the slot is running.
+ci_runner_host_image: ghcr.io/plexus-ms/ci-runner:0.111.0
+# Build the image on the host from the Dockerfile this role ships
+# (files/ci-runner) instead of pulling it, tagged ci_runner_host_image: a
+# trial of an unreleased role, or a tenant that wants no upstream registry
+# between it and its runners. Set a local tag with it, e.g. `ci-runner:local`.
+ci_runner_host_image_build: false
+
+# The tenant's GitHub App, which mints the just-in-time configs: its client
+# id and private key, from the CI vault through secrets.env (the vault
+# `<tenant>-ci`, item github-app). It needs "Administration: write" on the
+# repository for scope `repo`, "Self-hosted runners: write" on the
+# organisation for scope `org`. Written root-only to the host; once there,
+# a run without them keeps what the host has.
+ci_runner_host_app_client_id: "{{ lookup('env', 'CI_APP_CLIENT_ID') | default('', true) }}"
+ci_runner_host_app_private_key: "{{ lookup('env', 'CI_APP_PRIVATE_KEY') | default('', true) }}"
+
+# The registry pair (`ci_registry: own`): the CNCF distribution registry on
+# 127.0.0.1:5000 against this month's bucket, read-write, and on :5001
+# against the previous month's, read-only, as a job elsewhere starts them
+# for itself (`plx-ci registry`, which finds them answering here and starts
+# nothing; a large slot, with a network of its own, starts its own pair on
+# the same buckets). The buckets are `<owner>-ci-registry-<YYYY-MM>`; the
+# housekeeping creates this month's when it is missing and moves the pair to
+# the new buckets at the month change. Set false for a tenant on GHCR alone.
+ci_runner_host_registry: true
+ci_runner_host_registry_owner: "{{ ci_runner_host_org }}"
+ci_runner_host_registry_image: registry:2
+# The storage key of the CI vault (item bucket-registry), read and write on
+# the buckets plus creating them; root-only on the host, kept like the App's.
+ci_runner_host_registry_endpoint: "{{ lookup('env', 'REGISTRY_ENDPOINT') | default('', true) }}"
+ci_runner_host_registry_region: "{{ lookup('env', 'REGISTRY_REGION') | default('', true) }}"
+ci_runner_host_registry_access_key: "{{ lookup('env', 'REGISTRY_ACCESS_KEY') | default('', true) }}"
+ci_runner_host_registry_secret_key: "{{ lookup('env', 'REGISTRY_SECRET_KEY') | default('', true) }}"
+
+# The caches shared by every slot, bind-mounted into each container: the
+# pnpm store, built for concurrent writers (content-addressed, files added
+# by atomic rename). Owned by the image's runner user.
+ci_runner_host_cache_dir: /var/cache/ci-runner
+ci_runner_host_runner_uid: 1001
+
+# Housekeeping, hourly: the registry pair onto this month's buckets, the
+# pinned image pulled, stopped containers, unused images and volumes removed; fails,
+# and so mails through configure_mail, when the root file system is fuller
+# than this afterwards.
+ci_runner_host_disk_alert_percent: 85

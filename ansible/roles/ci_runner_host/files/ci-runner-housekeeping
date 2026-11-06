@@ -1,10 +1,10 @@
 #!/bin/sh
-# Hourly housekeeping of a hybrid runner host. Managed by Ansible
-# (ci_hybrid_host); IMAGE, PULL (false for an image built on the host),
+# Hourly housekeeping of a CI runner host. Managed by Ansible
+# (ci_runner_host); IMAGE, PULL (false for an image built on the host),
 # REGISTRY (true | false), REGISTRY_IMAGE and DISK_ALERT_PERCENT come from
 # the unit's environment. Hand-runnable as root:
 #   IMAGE=ghcr.io/plexus-ms/ci-runner:<train> PULL=true REGISTRY=true \
-#   REGISTRY_IMAGE=registry:2 DISK_ALERT_PERCENT=85 ci-hybrid-housekeeping
+#   REGISTRY_IMAGE=registry:2 DISK_ALERT_PERCENT=85 ci-runner-housekeeping
 set -eu
 : "${IMAGE:?}" "${PULL:?}" "${REGISTRY:?}" "${REGISTRY_IMAGE:?}" "${DISK_ALERT_PERCENT:?}"
 
@@ -15,12 +15,15 @@ set -eu
 # The pinned image, present before the next slot container needs it.
 [ "$PULL" != true ] || docker pull --quiet "$IMAGE" >/dev/null
 
-# The slots run with --rm and start no containers of their own (no socket),
-# so a stopped container is one a crash left. Every image but the pinned
-# runner image and the registry's is a previous pin's; the pinned one is
-# kept although a slot between two containers leaves it unused for a moment,
-# and an image a container still uses refuses removal.
+# The slots run with --rm and start no containers on this daemon (a small
+# or medium slot has no socket, a large one a daemon of its own), so a
+# stopped container is one a crash left, and so is a volume nothing uses: a
+# large slot's daemon data goes with its container otherwise. Every image
+# but the pinned runner image and the registry's is a previous pin's; the
+# pinned one is kept although a slot between two containers leaves it unused
+# for a moment, and an image a container still uses refuses removal.
 docker container prune --force
+docker volume prune --force
 docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do
   case "$ref" in "$IMAGE" | "$REGISTRY_IMAGE") continue ;; esac
   docker image rm "$id" >/dev/null 2>&1 && echo "removed the image $ref" || true

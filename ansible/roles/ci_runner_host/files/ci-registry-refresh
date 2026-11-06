@@ -1,11 +1,11 @@
 #!/bin/sh
-# Keeps the registry pair of a hybrid runner host on this month's buckets:
+# Keeps the registry pair of a CI runner host on this month's buckets:
 # the CNCF distribution registry on 127.0.0.1:5000 against
 # <owner>-ci-registry-<this month>, read-write, and on :5001 against the
 # previous month's, read-only — the pair `plx-ci registry` starts for itself
 # where none answers (§ 8 PLX-Delivery). Creates this month's bucket when it
 # is missing; a container already on the right bucket and image is left
-# running. Managed by Ansible (ci_hybrid_host), run by the hourly
+# running. Managed by Ansible (ci_runner_host), run by the hourly
 # housekeeping. Hand-runnable as root: ci-registry-refresh; with
 # RECREATE=True both containers are created anew (a new key).
 #

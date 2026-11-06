@@ -1,12 +1,12 @@
 name: runner-image
 
-# Builds the hybrid strategy's runner image (the Dockerfile ci_hybrid_host
-# ships, ansible/roles/ci_hybrid_host/files/ci-runner, § 8
+# Builds the runner image of a runner host's slots (the Dockerfile ci_runner_host
+# ships, ansible/roles/ci_runner_host/files/ci-runner, § 8
 # PLX-Delivery) and pushes it to ghcr.io/plexus-ms/ci-runner with a provenance
 # attestation. On the train's GitHub release it is tagged with the train
-# number, which is the pin ci_hybrid_host carries; run by hand on a branch it
+# number, which is the pin ci_runner_host carries; run by hand on a branch it
 # is tagged `sha-<commit>`, which is how a host tries an unreleased image
-# before the train (the role's `ci_hybrid_host_image`). A tag already in the
+# before the train (the role's `ci_runner_host_image`). A tag already in the
 # registry is pushed again, from the same source: the train number names one
 # commit.
 
@@ -47,14 +47,14 @@ jobs:
         id: push
         uses: docker/build-push-action@v7
         with:
-          context: ansible/roles/ci_hybrid_host/files/ci-runner
+          context: ansible/roles/ci_runner_host/files/ci-runner
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.description=GitHub Actions runner for the container slots of ci_hybrid_host
+            org.opencontainers.image.description=GitHub Actions runner for the container slots of ci_runner_host
             org.opencontainers.image.licenses=GPL-3.0-or-later
       - uses: actions/attest-build-provenance@v4
         with:

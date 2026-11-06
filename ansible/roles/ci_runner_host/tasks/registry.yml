@@ -2,7 +2,7 @@
 # The registry pair's storage key, root-only, as the env file the two
 # containers read; written when the run has the key, kept when it does not.
 - name: Write the registry's storage key
-  when: ci_hybrid_host_registry_access_key | length > 0 and ci_hybrid_host_registry_secret_key | length > 0
+  when: ci_runner_host_registry_access_key | length > 0 and ci_runner_host_registry_secret_key | length > 0
   no_log: true
   ansible.builtin.copy:
     dest: /etc/ci-registry/registry.env
@@ -11,26 +11,26 @@
     mode: "0600"
     content: |
       REGISTRY_STORAGE=s3
-      REGISTRY_STORAGE_S3_REGIONENDPOINT={{ ci_hybrid_host_registry_endpoint }}
-      REGISTRY_STORAGE_S3_REGION={{ ci_hybrid_host_registry_region }}
-      REGISTRY_STORAGE_S3_ACCESSKEY={{ ci_hybrid_host_registry_access_key }}
-      REGISTRY_STORAGE_S3_SECRETKEY={{ ci_hybrid_host_registry_secret_key }}
+      REGISTRY_STORAGE_S3_REGIONENDPOINT={{ ci_runner_host_registry_endpoint }}
+      REGISTRY_STORAGE_S3_REGION={{ ci_runner_host_registry_region }}
+      REGISTRY_STORAGE_S3_ACCESSKEY={{ ci_runner_host_registry_access_key }}
+      REGISTRY_STORAGE_S3_SECRETKEY={{ ci_runner_host_registry_secret_key }}
       REGISTRY_STORAGE_S3_FORCEPATHSTYLE=true
-  register: ci_hybrid_host_registry_key
+  register: ci_runner_host_registry_key
 
 - name: Check the storage key is on the host
   ansible.builtin.stat:
     path: /etc/ci-registry/registry.env
-  register: ci_hybrid_host_registry_env
+  register: ci_runner_host_registry_env
 
 - name: Require the storage key
   ansible.builtin.assert:
-    that: ci_hybrid_host_registry_env.stat.exists or ansible_check_mode
+    that: ci_runner_host_registry_env.stat.exists or ansible_check_mode
     fail_msg: >-
       The host has no storage key for the registry pair and the run brought
       none: REGISTRY_ENDPOINT, REGISTRY_REGION, REGISTRY_ACCESS_KEY and
       REGISTRY_SECRET_KEY, from the CI vault's item bucket-registry through
-      secrets.env; or ci_hybrid_host_registry false.
+      secrets.env; or ci_runner_host_registry false.
 
 - name: Write the pair's owner and image
   ansible.builtin.copy:
@@ -39,8 +39,8 @@
     group: root
     mode: "0644"
     content: |
-      OWNER={{ ci_hybrid_host_registry_owner }}
-      IMAGE={{ ci_hybrid_host_registry_image }}
+      OWNER={{ ci_runner_host_registry_owner }}
+      IMAGE={{ ci_runner_host_registry_image }}
 
 # A new key reaches running containers only when they are created anew; the
 # refresh otherwise leaves a container on the right bucket and image alone.
@@ -48,6 +48,6 @@
   ansible.builtin.command:
     cmd: /usr/local/sbin/ci-registry-refresh
   environment:
-    RECREATE: "{{ ci_hybrid_host_registry_key is changed }}"
-  register: ci_hybrid_host_refresh
-  changed_when: ci_hybrid_host_refresh.stdout | length > 0
+    RECREATE: "{{ ci_runner_host_registry_key is changed }}"
+  register: ci_runner_host_refresh
+  changed_when: ci_runner_host_refresh.stdout | length > 0

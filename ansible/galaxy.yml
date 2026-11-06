@@ -13,7 +13,7 @@ description: >-
   configure_firewall, configure_mail, install_and_join_netbird. A tenant's app
   hosts: configure_deploy_user, install_docker, install_caddy,
   configure_ingress, configure_secrets, configure_apps, install_alloy. A tenant's CI
-  runners: github_runner, ci_hybrid_host. The infrastructure layer: configure_proxmox,
+  runners: github_runner, ci_runner_host. The infrastructure layer: configure_proxmox,
   configure_pbs, configure_haproxy.
 license:
   - GPL-3.0-or-later

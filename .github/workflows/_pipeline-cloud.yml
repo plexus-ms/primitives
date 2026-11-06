@@ -64,7 +64,7 @@ on:
         description: >-
           The runner label of the small forge-side jobs (plan, release,
           deploy-targets, deploy, teardown): GitHub's `ubuntu-latest`, or a
-          slot of the tenant's runner host (`ci-small`, ci_hybrid_host).
+          slot of the tenant's runner host (`ci-small`, ci_runner_host).
         required: false
         type: string
         default: ubuntu-latest
@@ -197,7 +197,7 @@ jobs:
           permission-administration: write
       - name: Install exo
         # Into the job's home, not /usr/local: a slot of a runner host
-        # (ci_hybrid_host) runs with no-new-privileges, so sudo is no option.
+        # (ci_runner_host) runs with no-new-privileges, so sudo is no option.
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
@@ -398,7 +398,7 @@ jobs:
           REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
       - name: Install exo and crane
         # Into the job's home, not /usr/local: a slot of a runner host
-        # (ci_hybrid_host) runs with no-new-privileges, so sudo is no option.
+        # (ci_runner_host) runs with no-new-privileges, so sudo is no option.
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
@@ -560,7 +560,7 @@ jobs:
           permission-administration: write
       - name: Install exo
         # Into the job's home, not /usr/local: a slot of a runner host
-        # (ci_hybrid_host) runs with no-new-privileges, so sudo is no option.
+        # (ci_runner_host) runs with no-new-privileges, so sudo is no option.
         run: |
           mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo

@@ -1,0 +1,31 @@
+#!/bin/sh
+# The entry of a large slot's container (ci_runner_host, ci-runner-slot): a
+# Docker daemon of the container's own, then the runner as the runner user.
+# Started as root in a privileged container; the daemon's data is the volume
+# at /var/lib/docker, which goes with the container, so every job meets an
+# empty daemon and leaves nothing behind.
+set -eu
+
+# cgroup v2: a cgroup with processes of its own cannot hand controllers to
+# children, and the daemon needs them for its containers' limits. Move
+# everything here into a child first, then delegate.
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  mkdir -p /sys/fs/cgroup/init
+  xargs -rn1 </sys/fs/cgroup/cgroup.procs >/sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :
+  sed -e 's/ / +/g' -e 's/^/+/' </sys/fs/cgroup/cgroup.controllers >/sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || :
+fi
+
+dockerd --group docker >/var/log/dockerd.log 2>&1 &
+for _ in $(seq 1 60); do
+  docker info >/dev/null 2>&1 && break
+  sleep 1
+done
+if ! docker info >/dev/null 2>&1; then
+  echo "ci-runner-dind: the Docker daemon did not come up" >&2
+  tail -n 40 /var/log/dockerd.log >&2 || :
+  exit 1
+fi
+
+cd /home/runner
+export HOME=/home/runner USER=runner LOGNAME=runner
+exec setpriv --reuid runner --regid runner --init-groups ./run.sh

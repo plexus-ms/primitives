@@ -3,7 +3,7 @@
 - name: Every role of the collection
   hosts: all
   roles:
-    - ci_hybrid_host
+    - ci_runner_host
     - configure_apps
     - configure_base
     - configure_deploy_user
