@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { repoLabel, selectRunInstances, selectRunRegistrations } from './destroyInstances.ts';
-import type { Instance } from './exoscale.ts';
+import { destroyInstances, repoLabel, selectRunInstances, selectRunRegistrations } from './destroyInstances.ts';
+import type { Exo, Instance } from './exoscale.ts';
 
 const run = { repo: 'damage-ms/web', runId: '41836428433', attempt: '1' };
 const instance = (name: string, labels: Record<string, string>): Instance => ({
@@ -41,4 +41,45 @@ test('selectRunRegistrations matches every label shape of the run and leaves bus
     selectRunRegistrations(runners, run).map((r) => r.id),
     [1, 2, 3],
   );
+});
+
+const quiet = { say: () => undefined } as unknown as Parameters<typeof destroyInstances>[0];
+/** An Exo whose delete refuses an id as often as `refusals` says. */
+function fakeExo(instances: Instance[], refusals: Record<string, number>) {
+  const calls: string[] = [];
+  const exo = {
+    listInstances: async () => instances,
+    deleteInstance: async (id: string) => {
+      calls.push(id);
+      if ((refusals[id] ?? 0) > 0) {
+        refusals[id] = (refusals[id] ?? 0) - 1;
+        throw new Error('HTTP 400: Only running or stopped instances can be deleted.');
+      }
+      return undefined;
+    },
+  } as unknown as Exo;
+  return { exo, calls };
+}
+
+test('destroyInstances deletes the others when one is refused, and asks again for that one', async () => {
+  const starting = { ...instance('exo-build-41836428433-website-1', {}), state: 'starting' };
+  const running = instance('exo-build-41836428433-vernier-app-1', {});
+  const { exo, calls } = fakeExo([starting, running], { [starting.id]: 2 });
+  const waits: number[] = [];
+  const done = await destroyInstances(quiet, exo, undefined, run, { wait: async (ms) => void waits.push(ms) });
+  assert.deepEqual(calls, [starting.id, running.id, starting.id, starting.id]);
+  assert.deepEqual(waits, [10_000, 10_000]);
+  assert.equal(done.instances.length, 2);
+});
+
+test('destroyInstances fails after the last retry, naming what is left, with the others deleted', async () => {
+  const stuck = { ...instance('exo-build-41836428433-website-1', {}), state: 'starting' };
+  const running = instance('exo-build-41836428433-vernier-app-1', {});
+  const { exo, calls } = fakeExo([stuck, running], { [stuck.id]: 99 });
+  await assert.rejects(
+    destroyInstances(quiet, exo, undefined, run, { retries: 2, wait: async () => undefined }),
+    /1 instance\(s\) could not be deleted: exo-build-41836428433-website-1/,
+  );
+  assert.equal(calls.filter((id) => id === running.id).length, 1);
+  assert.equal(calls.filter((id) => id === stuck.id).length, 3);
 });

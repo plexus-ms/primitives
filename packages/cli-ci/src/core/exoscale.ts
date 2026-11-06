@@ -111,8 +111,11 @@ export class Exo {
     return this.effect('create-instance', [], JSON.stringify(body));
   }
 
-  /** Poll an operation to its end; the create completes within seconds. */
-  async waitOperation(id: string, attempts = 30): Promise<string> {
+  /**
+   * Poll an operation to its end, for three minutes: a create completes
+   * within seconds as a rule and has taken more than one minute under load.
+   */
+  async waitOperation(id: string, attempts = 90): Promise<string> {
     let state = 'pending';
     for (let i = 0; i < attempts && state === 'pending'; i++) {
       if (i > 0) await sleep(2000);

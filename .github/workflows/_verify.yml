@@ -316,10 +316,10 @@ jobs:
         run: plx-ci build "${{ matrix.app }}" "${{ matrix.hash }}" "$GITHUB_SHA"
 
   # After every build, whether or not one failed: a test whose candidate is
-  # missing fails on its own, the others run.
+  # missing fails on its own, the others run. Not in a cancelled run.
   test:
     needs: [plan, build]
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.tests != '[]' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.tests != '[]' }}
     strategy:
       fail-fast: false
       matrix:

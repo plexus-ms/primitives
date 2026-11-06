@@ -7,7 +7,7 @@
 // build that failed before the runner exited cleanly, a runner that never
 // came online.
 import type { Context } from '@plexus-ms/lib';
-import type { Exo, Instance } from './exoscale.ts';
+import { type Exo, type Instance, sleep } from './exoscale.ts';
 import type { GitHubRunners, Runner } from './github.ts';
 
 export interface RunIdentity {
@@ -52,6 +52,7 @@ export async function destroyInstances(
   exo: Exo,
   github: GitHubRunners | undefined,
   run: RunIdentity,
+  { retries = 12, wait = sleep }: { retries?: number; wait?: (ms: number) => Promise<void> } = {},
 ): Promise<Destroyed> {
   const all = await exo.listInstances();
   const mine = selectRunInstances(all, run);
@@ -65,11 +66,27 @@ export async function destroyInstances(
     )
     .map((i) => i.name);
   for (const name of kept) ctx.say(`${name}: kept after a missed boot, left alone`);
-  for (const i of mine) {
-    ctx.say(`${i.name} (${i.id}): ${i.state}`);
-    await exo.deleteInstance(i.id);
+  // One instance's refusal never spares the others. Exoscale deletes only a
+  // running or a stopped instance and answers 400 for one still starting, so
+  // what was refused is asked again, for up to two minutes.
+  let left = mine;
+  for (let round = 0; left.length > 0 && round <= retries; round++) {
+    if (round > 0) await wait(10_000);
+    const refused: Instance[] = [];
+    for (const i of left) {
+      if (round === 0) ctx.say(`${i.name} (${i.id}): ${i.state}`);
+      try {
+        await exo.deleteInstance(i.id);
+      } catch (error) {
+        if (round === retries) ctx.say(`✗ ${i.name} (${i.id}) is not deleted: ${(error as Error).message}`);
+        refused.push(i);
+      }
+    }
+    left = refused;
   }
-  ctx.say(`destroy-instances: ${mine.length} instance(s) of run ${run.runId} attempt ${run.attempt}`);
+  ctx.say(
+    `destroy-instances: ${mine.length - left.length} of ${mine.length} instance(s) of run ${run.runId} attempt ${run.attempt} deleted`,
+  );
   const registrations: string[] = [];
   if (github) {
     // A JIT registration stays listed when no job consumed it, online while
@@ -82,5 +99,9 @@ export async function destroyInstances(
     }
     ctx.say(`destroy-instances: ${registrations.length} registration(s) removed`);
   }
+  if (left.length > 0)
+    throw new Error(
+      `${left.length} instance(s) could not be deleted: ${left.map((i) => i.name).join(', ')}; they power off on their own, and the sweep deletes them`,
+    );
   return { instances: mine.map((i) => i.name), kept, registrations };
 }
