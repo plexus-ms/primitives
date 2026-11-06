@@ -1,35 +1,39 @@
 name: _deploy-targets
 
 # Mounts the deploy-targets verb (§ 3 PLX-Platform) on a platform repo and
-# emits {app: target} for the caller to index per matrix leg. Logic lives in
-# `plx deploy-targets` (@plexus-ms/cli, pinned in the caller's mise.toml),
-# never here.
+# emits the deploys of the third-party apps the repo holds itself: one leg
+# per directory under apps/ with a target in production, for the caller to
+# fan _deploy.yml over. Every app, on every push: the deploy verb ends at
+# once where the host already serves the app's file, so only a changed app
+# restarts. The inventory's records of apps built in an app repo start
+# nothing here. Logic lives in `plx deploy-targets` (@plexus-ms/cli, pinned
+# in the caller's mise.toml), never here.
 
 on:
   workflow_call:
     inputs:
-      runner:
+      strategy:
         description: >-
-          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
-          runner the tenant owns (GitHub bills minutes only on its own runners).
+          Where the job runs (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem` or `hybrid`, a small slot of the tenant's runner host.
         required: false
         type: string
-        default: ubuntu-latest
+        default: github
     outputs:
-      map:
-        description: JSON object of app name → deploy target, for the apps whose inventory file names one.
-        value: ${{ jobs.deploy-targets.outputs.map }}
+      matrix:
+        description: JSON list of {app, host}, one per app under apps/ with a deploy target in production.
+        value: ${{ jobs.deploy-targets.outputs.matrix }}
 
 permissions:
   contents: read
 
 jobs:
   deploy-targets:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
     outputs:
-      map: ${{ steps.run.outputs.map }}
+      matrix: ${{ steps.run.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       - id: run
-        run: echo "map=$(plx deploy-targets inventory)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(plx deploy-targets --environment production --apps apps inventory)" | tee -a "$GITHUB_OUTPUT"

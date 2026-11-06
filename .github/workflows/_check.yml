@@ -1,0 +1,108 @@
+name: _check
+
+# Mounts `check` (§§ 1 and 2 PLX-Delivery): the steps that ascertain code
+# quality and need no machine in particular, repo-wide. In an app repo that
+# is lint, typecheck and the pure tests, the part of verify that gates
+# everything else: a commit that fails here builds and launches nothing. A
+# repo without images to build passes `tasks: verify`, its whole contract
+# verb. The incantations are the repo's own mise tasks.
+#
+# With `turbo-cache`, Turbo's remote cache (§ 8 PLX-Delivery): a cache server
+# for the length of the job, on loopback, backed by the bucket
+# <owner>-ci-turbo, whose keys are read from the vault; a task whose inputs
+# did not change is replayed from any earlier job on any runner.
+
+on:
+  workflow_call:
+    inputs:
+      strategy:
+        description: >-
+          Where the jobs run (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem`, the slots of the tenant's runner hosts (ci_runner_host)
+          for every size; `hybrid`, slots for the small and medium jobs and a
+          throwaway cloud instance for each large one.
+        required: false
+        type: string
+        default: github
+      size:
+        description: The size of the job, `medium` or `small`; the label it asks for off the forge's runners is `ci-<size>`.
+        required: false
+        type: string
+        default: medium
+      tasks:
+        description: The repo's mise tasks to run, in order, separated by spaces.
+        required: false
+        type: string
+        default: lint check
+      turbo-cache:
+        description: Use Turbo's remote cache in the tenant's bucket; needs the vault's token.
+        required: false
+        type: boolean
+        default: false
+      vault:
+        description: The vault CI reads (§ 3 PLX-Secrets). Default <owner>-ci.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      op-service-account-token:
+        description: The vault's service account token; needed with `turbo-cache` only.
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  VAULT: ${{ inputs.vault || format('{0}-ci', github.repository_owner) }}
+
+jobs:
+  check:
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || format('ci-{0}', inputs.size) }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load the Turbo cache bucket's keys from the vault
+        if: ${{ inputs.turbo-cache }}
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
+          TURBO_CACHE_ENDPOINT: op://${{ env.VAULT }}/bucket-turbo/endpoint
+          TURBO_CACHE_REGION: op://${{ env.VAULT }}/bucket-turbo/region
+          TURBO_CACHE_ACCESS_KEY: op://${{ env.VAULT }}/bucket-turbo/access-key-id
+          TURBO_CACHE_SECRET_KEY: op://${{ env.VAULT }}/bucket-turbo/secret-access-key
+      # The server's token is minted here and never leaves the machine; the
+      # port is the first free one, since the slots of a runner host share
+      # its network.
+      - name: Prepare the Turbo remote cache
+        id: turbo-cache
+        if: ${{ inputs.turbo-cache }}
+        run: |
+          port=8585
+          while (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do port=$((port + 1)); done
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          {
+            echo "port=$port"
+            echo "bucket=${GITHUB_REPOSITORY_OWNER}-ci-turbo"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "TURBO_API=http://127.0.0.1:$port"
+            echo "TURBO_TOKEN=$token"
+            echo "TURBO_TEAM=${GITHUB_REPOSITORY//\//-}"
+          } >> "$GITHUB_ENV"
+      - uses: brunojppb/turbo-cache-server@7a089b8e7cf1579794644119a3561bbb1314c946 # 5.0.0
+        if: ${{ inputs.turbo-cache }}
+        env:
+          PORT: ${{ steps.turbo-cache.outputs.port }}
+          S3_ENDPOINT: ${{ env.TURBO_CACHE_ENDPOINT }}
+          S3_REGION: ${{ env.TURBO_CACHE_REGION }}
+          S3_BUCKET_NAME: ${{ steps.turbo-cache.outputs.bucket }}
+          S3_ACCESS_KEY: ${{ env.TURBO_CACHE_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ env.TURBO_CACHE_SECRET_KEY }}
+          S3_USE_PATH_STYLE: 'true'
+      - uses: jdx/mise-action@v5
+      - name: Check
+        env:
+          TASKS: ${{ inputs.tasks }}
+        run: for task in $TASKS; do mise run "$task"; done

@@ -5,30 +5,31 @@ name: _deploy
 # pinned in the caller's mise.toml), never here; the caller supplies the host
 # and the environment. The caller is the app's SOURCE repo, because the verb
 # reads apps/<app>/docker/compose.yaml from the checkout and renders it onto
-# the host with the image ref pinned: an app repo's pipeline after the
-# release, or the platform repo's deploy.yml for a third-party app, whose
+# the host with the image ref pinned: an app repo's release after the
+# publish, or the platform repo's deploy.yml for a third-party app, whose
 # compose.yaml pins its own image (no image-ref).
 #
-# Two ways to hand over the keys: the secret `ssh-key` (and `netbird-setup-key`)
-# from the caller's own secrets, or the vault's service account token, with
-# which the job reads `deploy-ssh/private key` and `netbird/setup-key` from the
-# vault `<owner>-ci` (§ 3 PLX-Secrets). The vault wins when both are given.
+# The keys come from the vault `<owner>-ci` (§ 3 PLX-Secrets), read with its
+# service account token: `deploy-ssh/private key`, and `netbird/setup-key`
+# where the job joins the overlay.
 #
 # The host is reached as named, or, with `overlay: netbird`, over the tenant's
-# overlay: the job joins it as an ephemeral peer with a setup key whose policy
-# allows the app hosts' SSH and nothing else, deploys, and leaves. Joining is
-# the job's environment, like the SSH agent, so it is steps here and no verb.
+# overlay. A slot of a runner host is on the overlay already, through the
+# host's network, so only a job on the forge's runners joins: as an ephemeral
+# peer with a setup key whose policy allows the app hosts' SSH and nothing
+# else; it deploys and leaves. Joining is the job's environment, like the SSH
+# agent, so it is steps here and no verb.
 
 on:
   workflow_call:
     inputs:
-      runner:
+      strategy:
         description: >-
-          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
-          runner the tenant owns (GitHub bills minutes only on its own runners).
+          Where the job runs (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem` or `hybrid`, a small slot of the tenant's runner host.
         required: false
         type: string
-        default: ubuntu-latest
+        default: github
       tenant:
         description: Tenant id — first segment of the app dir (/opt/stacks/<tenant>/<app>).
         required: true
@@ -61,17 +62,17 @@ on:
         type: string
         default: ''
       overlay:
-        description: "`netbird` joins the tenant's overlay for the length of the job; empty reaches the host as named."
+        description: "`netbird`: the host is on the tenant's overlay, which a job on the forge's runners joins for its length; `none` reaches the host as named."
         required: false
         type: string
-        default: ''
+        default: none
       netbird-version:
         description: The NetBird client the job installs, from pkgs.netbird.io.
         required: false
         type: string
         default: 0.82.0
       vault:
-        description: The vault the keys are read from when the token is given. Default <owner>-ci.
+        description: The vault the keys are read from (§ 3 PLX-Secrets). Default <owner>-ci.
         required: false
         type: string
         default: ''
@@ -86,15 +87,9 @@ on:
         type: string
         default: ''
     secrets:
-      ssh-key:
-        description: Private key authorized as the deploy user on the host; or the vault's `deploy-ssh/private key`.
-        required: false
-      netbird-setup-key:
-        description: A reusable setup key for ephemeral peers; or the vault's `netbird/setup-key`.
-        required: false
       op-service-account-token:
-        description: The vault's service account token, when the keys come from the vault.
-        required: false
+        description: The vault's service account token, reading the vault `<owner>-ci`.
+        required: true
 
 permissions:
   contents: read
@@ -104,7 +99,7 @@ env:
 
 jobs:
   deploy:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
     # Serialize deploys per app and environment: at most one running and one
     # pending run per group, and GitHub replaces the pending run with the
     # newest — so the newest commit always deploys last. Never cancels a
@@ -115,8 +110,6 @@ jobs:
       cancel-in-progress: false
     env:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
-      SSH_KEY_SECRET: ${{ secrets.ssh-key }}
-      NB_SETUP_KEY_SECRET: ${{ secrets.netbird-setup-key }}
     steps:
       # The caller's repo (the app's source repo) — cwd for the verb, which
       # reads apps/<app>/ relative here. Same SHA the image was built from.
@@ -136,7 +129,6 @@ jobs:
           pnpm --filter @plexus-ms/cli... run build >/dev/null
           mkdir -p bin && ln -sf "$PWD/packages/cli/dist/plx.js" bin/plx && echo "$PWD/bin" >> "$GITHUB_PATH"
       - name: Load the deploy key from the vault
-        if: ${{ env.OP_SERVICE_ACCOUNT_TOKEN != '' }}
         uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
           export-env: true
@@ -145,7 +137,7 @@ jobs:
           # that out by default, which ssh-add does not take for every key type.
           SSH_KEY: op://${{ env.VAULT }}/deploy-ssh/private key?ssh-format=openssh
       - name: Load the overlay's setup key from the vault
-        if: ${{ env.OP_SERVICE_ACCOUNT_TOKEN != '' && inputs.overlay == 'netbird' }}
+        if: ${{ inputs.overlay == 'netbird' && inputs.strategy == 'github' }}
         uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
           export-env: true
@@ -154,24 +146,19 @@ jobs:
       # An ephemeral peer for the length of the job: the client from NetBird's
       # repository at a pinned version, joined with the setup key in the
       # environment (never on argv), and the job waits until the management
-      # server lists it as connected. A runner already on the overlay (a slot
-      # of a runner host that is a peer itself, sharing its network) resolves
-      # the host's name before joining and joins nothing.
+      # server lists it as connected. Only on the forge's runners: a slot of a
+      # runner host shares the network of a host that is a peer itself.
       - name: Join the overlay
-        if: ${{ inputs.overlay == 'netbird' }}
+        if: ${{ inputs.overlay == 'netbird' && inputs.strategy == 'github' }}
         env:
           NETBIRD_VERSION: ${{ inputs.netbird-version }}
         run: |
           host='${{ inputs.host }}'; host=${host#ssh://}; host=${host##*@}; host=${host%%:*}
-          if getent hosts "$host"; then
-            echo "this runner is on the overlay already"
-            exit 0
-          fi
           echo "joined=true" >> "$GITHUB_ENV"
           curl -fsSL https://pkgs.netbird.io/debian/public.key | sudo gpg --dearmor -o /usr/share/keyrings/netbird-archive-keyring.gpg
           echo 'deb [signed-by=/usr/share/keyrings/netbird-archive-keyring.gpg] https://pkgs.netbird.io/debian stable main' | sudo tee /etc/apt/sources.list.d/netbird.list >/dev/null
           sudo apt-get update -qq && sudo apt-get install -y -qq "netbird=$NETBIRD_VERSION" >/dev/null
-          NB_SETUP_KEY="${NB_SETUP_KEY:-$NB_SETUP_KEY_SECRET}" sudo --preserve-env=NB_SETUP_KEY netbird up --hostname "ci-${GITHUB_RUN_ID}"
+          sudo --preserve-env=NB_SETUP_KEY netbird up --hostname "ci-${GITHUB_RUN_ID}"
           for _ in $(seq 1 30); do sudo netbird status | grep -q 'Management: Connected' && break; sleep 1; done
           # The names arrive with the network map, some seconds after the
           # management connection; peers stay idle until traffic, so the
@@ -187,7 +174,7 @@ jobs:
           eval "$(ssh-agent -s)"
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
-          key="${SSH_KEY:-$SSH_KEY_SECRET}"
+          key="$SSH_KEY"
           if [ "$(printf '%s\n' "$key" | wc -l)" -le 1 ]; then
             key=$(printf '%s' "$key" | sed -E 's/^(-----BEGIN [A-Z0-9 ]+-----) */\1\n/; s/ *(-----END [A-Z0-9 ]+-----)$/\n\1/' | awk 'NR==2 { gsub(/ /, "\n") } { print }')
           fi

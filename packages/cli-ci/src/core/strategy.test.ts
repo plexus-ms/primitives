@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { joinsOverlay, runnerOf, settingsOf } from './strategy.ts';
+import { runnerOf, settingsOf } from './strategy.ts';
 
 test('the settings default to the forge’s runners and registry, and the registry follows the strategy', () => {
   assert.deepEqual(settingsOf({}), { strategy: 'github', registry: 'ghcr', overlay: 'none' });
@@ -30,11 +30,4 @@ test('a size runs on the forge, on a slot, or under hybrid on an instance of its
   assert.equal(runnerOf('hybrid', 'small'), 'ci-small');
   assert.equal(runnerOf('hybrid', 'large', 'exo-build-1-a-1'), 'exo-build-1-a-1');
   assert.throws(() => runnerOf('hybrid', 'large'), /needs its instance/);
-});
-
-test('a deploy joins the overlay only from the forge’s runners', () => {
-  assert.equal(joinsOverlay(settingsOf({ CI_OVERLAY: 'netbird' })), true);
-  assert.equal(joinsOverlay(settingsOf({ CI_STRATEGY: 'hybrid', CI_OVERLAY: 'netbird' })), false);
-  assert.equal(joinsOverlay(settingsOf({ CI_STRATEGY: 'on-prem', CI_OVERLAY: 'netbird' })), false);
-  assert.equal(joinsOverlay(settingsOf({})), false);
 });

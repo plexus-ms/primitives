@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Context } from './context.ts';
 import {
+  deployLegs,
   deploymentSlug,
   parseInventoryFile,
   readDeployTargets,
@@ -113,4 +114,13 @@ test('readDeployTargets reads group_vars and host_vars, .yml and .yaml, and noth
 test('readDeployTargets: an inventory without vars dirs is empty, a missing one is a usage error', async () => {
   assert.deepEqual(await readDeployTargets(new Context({}, fakeIo({ inv: { 'hosts.yml': '' } })), '/inv'), {});
   await assert.rejects(readDeployTargets(new Context({}, fakeIo({})), '/nowhere'), UsageError);
+});
+
+test('deployLegs: a leg per app of the repo with a target, sorted; the rest are named, and foreign records start nothing', () => {
+  const targets = { beszel: 'ssh://plexus@vm103', website: 'ssh://plexus@vm101' };
+  assert.deepEqual(deployLegs(targets, ['pocket-id', 'beszel']), {
+    legs: [{ app: 'beszel', host: 'ssh://plexus@vm103' }],
+    without: ['pocket-id'],
+  });
+  assert.deepEqual(deployLegs(targets, []), { legs: [], without: [] });
 });

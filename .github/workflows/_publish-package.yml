@@ -1,30 +1,22 @@
-name: _release-package
+name: _publish-package
 
-# The package shape of the release verb (§ 5 PLX-Delivery): from verified
-# code on the trunk, version and publish with changesets. On a push with
+# The package shape of `publish` (§ 5 PLX-Delivery): from checked code on
+# the trunk, version and publish with changesets. On a push with
 # pending changesets it opens or updates the "version packages" PR; on the
 # push that merges that PR it publishes, token-less through OIDC trusted
-# publishing, with provenance. The caller runs this after _verify.yml in the
-# same run; the verb does not re-verify.
+# publishing, with provenance. The caller runs this after _check.yml in the
+# same run; the verb does not check again.
 
 on:
   workflow_call:
     inputs:
-      runner:
+      strategy:
         description: >-
-          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
-          runner the tenant owns (GitHub bills minutes only on its own runners).
+          Where the job runs (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem` or `hybrid`, a small slot of the tenant's runner host.
         required: false
         type: string
-        default: ubuntu-latest
-      persistent:
-        description: >-
-          The runner keeps its disk between jobs (a runner the tenant owns):
-          caches then stay on the machine instead of round-tripping through
-          GitHub (§ 4 PLX-Delivery).
-        required: false
-        type: boolean
-        default: false
+        default: github
 
 permissions:
   contents: write       # push the version PR and the tags
@@ -32,21 +24,19 @@ permissions:
   id-token: write       # npm build provenance
 
 jobs:
-  release:
-    runs-on: ${{ inputs.runner }}
-    concurrency: release
+  publish:
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
+    concurrency: publish
     # mise install runs the postinstall hook, which points core.hooksPath at
     # hk, so hk's hooks would fire on anything changesets/action commits or
     # pushes through the git CLI. Wrong in both directions: pre-push cannot
     # resolve the tag objects `changeset publish` creates, and re-running
-    # verify here only repeats what the verify job already ran.
+    # the checks here only repeats what the check job already ran.
     env:
       HK_SKIP_HOOK: pre-commit,pre-push
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
-        with:
-          cache: ${{ !inputs.persistent }}
       - run: pnpm install --frozen-lockfile
       # Build every package in dependency order before publishing: `changeset
       # publish` runs the packages' `prepack` hooks alphabetically, so a

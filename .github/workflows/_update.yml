@@ -27,21 +27,13 @@ on:
         required: false
         type: string
         default: ''
-      runner:
+      strategy:
         description: >-
-          Runner label for every job: GitHub's `ubuntu-latest`, or the label of a
-          runner the tenant owns (GitHub bills minutes only on its own runners).
+          Where the job runs (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem` or `hybrid`, a small slot of the tenant's runner host.
         required: false
         type: string
-        default: ubuntu-latest
-      persistent:
-        description: >-
-          The runner keeps its disk between jobs (a runner the tenant owns):
-          caches then stay on the machine instead of round-tripping through
-          GitHub (§ 4 PLX-Delivery).
-        required: false
-        type: boolean
-        default: false
+        default: github
       app_id:
         description: >-
           The ID of a GitHub App installed on the repo with contents and pull
@@ -67,7 +59,7 @@ permissions:
 
 jobs:
   update:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
     steps:
       - id: app
         if: ${{ inputs.app_id != '' }}
@@ -79,8 +71,6 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token || secrets.token || github.token }}
       - uses: jdx/mise-action@v5
-        with:
-          cache: ${{ !inputs.persistent }}
       - run: command -v gh >/dev/null || mise use --global gh@latest
       - run: plx -y update ${{ inputs.train != '' && format('--train {0}', inputs.train) || '' }}
         env:

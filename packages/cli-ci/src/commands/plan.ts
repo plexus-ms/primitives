@@ -5,7 +5,7 @@
 // releases into and each app's target there, from a checkout of the platform
 // repo's inventory. Launches nothing: under hybrid, `plx-ci hybrid
 // create-instances` reads the matrices next. Writes matrix=, tests=, apps=,
-// deploys=, environment= and overlay-join= to GITHUB_OUTPUT when that is set.
+// deploys= and environment= to GITHUB_OUTPUT when that is set.
 // From the environment: CI_STRATEGY, CI_REGISTRY, CI_OVERLAY; GITHUB_RUN_ID
 // and GITHUB_RUN_ATTEMPT (they name the instances under hybrid); for
 // --deploy GITHUB_EVENT_NAME, GITHUB_REF_NAME, GITHUB_SHA and IMAGE_PREFIX.
@@ -18,7 +18,6 @@ import { resolve } from 'node:path';
 import { readDeployTargets, targetsIn } from '@plexus-ms/lib';
 import type { Command } from 'commander';
 import { environmentOf, type Mode, plan, readHashes } from '../core/plan.ts';
-import { joinsOverlay } from '../core/strategy.ts';
 import { contextOf } from '../program.ts';
 import { imagePrefix, need, registryFor, settings, withStrategy } from './shared.ts';
 
@@ -100,7 +99,6 @@ export function register(program: Command): void {
             `apps=${JSON.stringify(result.apps)}`,
             `deploys=${JSON.stringify(result.deploys)}`,
             `environment=${result.environment}`,
-            `overlay-join=${joinsOverlay(s)}`,
             '',
           ].join('\n'),
         );

@@ -44,8 +44,10 @@ export { ANSWERS_FILE, type Answers, COPIER_VERSION, copierVia, parseAnswers, TE
 export { type Deploy, type DeployOptions, defaultAppDir, deploy, q as shellQuote, renderCompose } from './deploy.ts';
 export {
   DEFAULT_ENVIRONMENT,
+  type DeployLeg,
   type Deployment,
   type DeployTargets,
+  deployLegs,
   deploymentSlug,
   type EnvironmentTargets,
   type InventoryFile,

@@ -1,6 +1,7 @@
 // The three answers a repo gives about its CI (§ 8 PLX-Delivery), read once:
 // the strategy (where the jobs of each size run), the registry (where the
-// candidates live) and the overlay (how a deploy reaches the hosts). The
+// candidates live) and the overlay (how a deploy reaches the hosts; the
+// deploy mount acts on it, the commands only check it). The
 // reusable workflows set them as CI_STRATEGY, CI_REGISTRY and CI_OVERLAY from
 // their inputs; `--strategy` overrides the first by hand. Pure, so that the
 // tests pin the defaults and the labels.
@@ -60,10 +61,3 @@ export function runnerOf(strategy: Strategy, size: Size, instance?: string): str
   }
   return sizeLabel(size);
 }
-
-/**
- * Whether a deploy job joins the overlay itself: only where its runner is off
- * it. A runner host is on the overlay and its slots share its network.
- */
-export const joinsOverlay = (settings: Settings): boolean =>
-  settings.overlay === 'netbird' && settings.strategy === 'github';

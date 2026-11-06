@@ -1,0 +1,138 @@
+name: _housekeeping
+
+# The daily housekeeping of a tenant's CI (§ 8 PLX-Delivery), mounted on a
+# schedule where the thing kept lives. Logic lives in plx-ci
+# (@plexus-ms/cli-ci, pinned in the caller's mise.toml), never here.
+#
+#   hybrid          the last layer under the instances: delete every one that is stopped or
+#                   past its death deadline and mail about it; one kept after a missed boot
+#                   is spared, mailed about again after seven days, deleted after fourteen
+#   registry own    the month's buckets: this month's exists, the one from two months ago goes
+#   registry ghcr   the candidates of this repo's apps older than thirty days go
+#
+# The instances and the buckets are the tenant's, not one app repo's, so the
+# platform repo mounts the first two; the packages are the app repo's, and
+# only its own workflow token may delete their versions, so the app repo
+# mounts the third.
+
+on:
+  workflow_call:
+    inputs:
+      strategy:
+        description: >-
+          Where the jobs run (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem`, the slots of the tenant's runner hosts (ci_runner_host)
+          for every size; `hybrid`, slots for the small and medium jobs and a
+          throwaway cloud instance for each large one.
+        required: false
+        type: string
+        default: github
+      registry:
+        description: "Which retention to run: `own`, the registry buckets; `ghcr`, the candidates of the caller's apps in the forge's registry; `none`, neither."
+        required: false
+        type: string
+        default: none
+      vault:
+        description: The vault CI reads (§ 3 PLX-Secrets). Default <owner>-ci.
+        required: false
+        type: string
+        default: ''
+      alerts-email:
+        description: The address mailed when the sweep removes something or a kept instance is still there; empty for no mail. A preset answer, never a vault item (§ 3 PLX-Secrets).
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: Only list what would be deleted.
+        required: false
+        type: boolean
+        default: false
+      primitives-ref:
+        description: >-
+          A trial of an unreleased primitives: plx-ci and plx are built from a
+          checkout of plexus-ms/primitives at this ref instead of the caller's
+          pins. Empty for the pins.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      op-service-account-token:
+        description: The vault's service account token; needed under hybrid and with a registry of the tenant's own.
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  EXO_VERSION: 1.103.2
+  CI_STRATEGY: ${{ inputs.strategy }}
+  VAULT: ${{ inputs.vault || format('{0}-ci', github.repository_owner) }}
+  MAIL_TO: ${{ inputs.alerts-email }}
+
+jobs:
+  housekeeping:
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        if: ${{ inputs.primitives-ref == '' }}
+        with:
+          install_args: node npm:@plexus-ms/cli-ci
+      - uses: actions/checkout@v7
+        if: ${{ inputs.primitives-ref != '' }}
+        with:
+          repository: plexus-ms/primitives
+          ref: ${{ inputs.primitives-ref }}
+          path: .plx-ci
+      - uses: actions/setup-node@v7
+        if: ${{ inputs.primitives-ref != '' }}
+        with:
+          node-version-file: .plx-ci/mise.toml
+      - name: plx-ci from the unreleased primitives
+        if: ${{ inputs.primitives-ref != '' }}
+        run: |
+          cd .plx-ci && corepack enable && pnpm install --frozen-lockfile --ignore-scripts >/dev/null
+          pnpm --filter @plexus-ms/cli-ci... run build >/dev/null
+          mkdir -p bin && ln -sf "$PWD/packages/cli-ci/dist/plx-ci.js" bin/plx-ci && echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Load the cloud's key and the relay from the vault
+        if: ${{ inputs.strategy == 'hybrid' }}
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
+          EXOSCALE_API_KEY: op://${{ env.VAULT }}/exoscale/ci-launch/key
+          EXOSCALE_API_SECRET: op://${{ env.VAULT }}/exoscale/ci-launch/secret
+          SMTP_HOST: op://${{ env.VAULT }}/smtp-relay/host
+          SMTP_PORT: op://${{ env.VAULT }}/smtp-relay/port
+          SMTP_USER: op://${{ env.VAULT }}/smtp-relay/username
+          SMTP_PASSWORD: op://${{ env.VAULT }}/smtp-relay/password
+          MAIL_FROM: op://${{ env.VAULT }}/smtp-relay/from
+      - name: Load the registry's keys from the vault
+        if: ${{ inputs.registry == 'own' }}
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
+          REGISTRY_ENDPOINT: op://${{ env.VAULT }}/bucket-registry/endpoint
+          REGISTRY_REGION: op://${{ env.VAULT }}/bucket-registry/region
+          REGISTRY_ACCESS_KEY: op://${{ env.VAULT }}/bucket-registry/access-key-id
+          REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
+      # Into the job's home, not /usr/local: a small slot of a runner host
+      # (ci_runner_host) runs with no-new-privileges, so sudo is no option.
+      - name: Install exo
+        if: ${{ inputs.strategy == 'hybrid' || inputs.registry == 'own' }}
+        run: |
+          mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
+      - name: Sweep the instances
+        if: ${{ inputs.strategy == 'hybrid' }}
+        run: plx-ci ${{ inputs.dry-run && '-n' || '' }} hybrid sweep-instances
+      - name: Rotate the registry
+        if: ${{ inputs.registry == 'own' || inputs.registry == 'ghcr' }}
+        env:
+          CI_REGISTRY: ${{ inputs.registry }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: plx-ci ${{ inputs.dry-run && '-n' || '' }} registry rotate

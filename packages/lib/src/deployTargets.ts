@@ -14,6 +14,7 @@
 //
 //   plx deploy-targets [inventory]                    # {"app": {"production": "ssh://...", "staging": "ssh://..."}, ...}
 //   plx deploy-targets --environment production [inventory] # {"app": "ssh://...", ...}, one environment, flat
+//   plx deploy-targets --environment production --apps apps # [{"app": "...", "host": "ssh://..."}], the apps under apps/, for a matrix
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import type { Context } from './context.ts';
@@ -99,6 +100,29 @@ export function targetsIn(targets: DeployTargets, environment: string): Environm
     if (target !== undefined) flat[app] = target;
   }
   return flat;
+}
+
+/** One deploy of a matrix: an app and where it deploys. */
+export interface DeployLeg {
+  app: string;
+  host: string;
+}
+
+/**
+ * The deploys of the apps a repo holds itself, in one environment: a leg per
+ * app with a target there, and the apps without one, which have no
+ * deployment in it. A platform repo fans its deploy over the legs, so that
+ * the inventory's records of apps built elsewhere start nothing here.
+ */
+export function deployLegs(targets: EnvironmentTargets, apps: string[]): { legs: DeployLeg[]; without: string[] } {
+  const legs: DeployLeg[] = [];
+  const without: string[] = [];
+  for (const app of [...apps].sort()) {
+    const host = targets[app];
+    if (host === undefined) without.push(app);
+    else legs.push({ app, host });
+  }
+  return { legs, without };
 }
 
 /** Read every group_vars and host_vars file under the inventory directory and map the deployments. */

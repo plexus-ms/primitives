@@ -1,0 +1,205 @@
+name: _on-release
+
+# A release of an app repo (§§ 2 and 8 PLX-Delivery), mounted on a push to an
+# environment branch by the tenant's on_release.yml: the verify phase a pull
+# request runs (_on-pr.yml: check, plan, build, test), then the release
+# phase.
+#
+#   verify    _on-pr.yml, planning the deploys too
+#   publish   small   the tested manifest under its commit in the forge's registry
+#   deploy    small   _deploy.yml per app with a target in the environment
+#
+# A promotion never builds: a commit whose images the registry holds is
+# published from them and deployed. A newer push to the same branch cancels a
+# verify still going for the older commit, whose verdict nobody waits for;
+# a publish or a deploy once started runs to its end (§ 2 PLX-Delivery).
+# Run by hand on an environment branch, it deploys that branch again.
+
+on:
+  workflow_call:
+    inputs:
+      tenant:
+        description: Tenant slug, the first segment of the app dirs on the hosts (§ 3 PLX-Tenancy).
+        required: true
+        type: string
+      strategy:
+        description: >-
+          Where the jobs run (§ 8 PLX-Delivery): `github`, the forge's runners;
+          `on-prem`, the slots of the tenant's runner hosts (ci_runner_host)
+          for every size; `hybrid`, slots for the small and medium jobs and a
+          throwaway cloud instance for each large one.
+        required: false
+        type: string
+        default: github
+      registry:
+        description: "Where the candidates live: `ghcr`, the forge's registry, beside the published images; `own`, the registry pair on the tenant's object storage."
+        required: false
+        type: string
+        default: ghcr
+      overlay:
+        description: "How a deploy reaches the hosts: `netbird`, over the tenant's overlay, which the job joins itself where its runner is not on it; `none`, as named."
+        required: false
+        type: string
+        default: none
+      environment:
+        description: >-
+          The environment this run releases into. Empty derives it from the
+          branch (main → production, develop → staging, else none), which is
+          the rule; a caller sets it only to stand in for an environment branch.
+        required: false
+        type: string
+        default: ''
+      image-prefix:
+        description: Where published images go, `<registry>/<owner>`; the image is `<prefix>/<app>:<sha>`. Default ghcr.io/<owner>.
+        required: false
+        type: string
+        default: ''
+      vault:
+        description: The vault CI reads (§ 3 PLX-Secrets). Default <owner>-ci.
+        required: false
+        type: string
+        default: ''
+      alerts-email:
+        description: Hybrid, the address mailed when an instance misses its boot and is kept; empty for no mail. A preset answer, never a vault item (§ 3 PLX-Secrets).
+        required: false
+        type: string
+        default: ''
+      instance-type:
+        description: Hybrid, the type of the instances; empty for plx-ci's default.
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: Deploy as `plx -n deploy`, printing the lines without reaching the host.
+        required: false
+        type: boolean
+        default: false
+      primitives-ref:
+        description: >-
+          A trial of an unreleased primitives: plx-ci and plx are built from a
+          checkout of plexus-ms/primitives at this ref instead of the caller's
+          pins. Empty for the pins.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      op-service-account-token:
+        description: The vault's service account token, reading the vault `<owner>-ci`.
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+env:
+  EXO_VERSION: 1.103.2
+  CRANE_VERSION: 0.22.1
+  CI_STRATEGY: ${{ inputs.strategy }}
+  CI_REGISTRY: ${{ inputs.registry }}
+  CI_OVERLAY: ${{ inputs.overlay }}
+  VAULT: ${{ inputs.vault || format('{0}-ci', github.repository_owner) }}
+  IMAGE_PREFIX: ${{ inputs.image-prefix || format('ghcr.io/{0}', github.repository_owner) }}
+
+jobs:
+  verify:
+    concurrency:
+      group: verify-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/_on-pr.yml
+    with:
+      strategy: ${{ inputs.strategy }}
+      registry: ${{ inputs.registry }}
+      deploy: true
+      environment: ${{ inputs.environment }}
+      image-prefix: ${{ inputs.image-prefix }}
+      vault: ${{ inputs.vault }}
+      alerts-email: ${{ inputs.alerts-email }}
+      instance-type: ${{ inputs.instance-type }}
+      primitives-ref: ${{ inputs.primitives-ref }}
+    secrets:
+      op-service-account-token: ${{ secrets.op-service-account-token }}
+
+  # Once the whole verify phase passed, into an environment.
+  publish:
+    needs: verify
+    if: ${{ always() && needs.verify.result == 'success' && needs.verify.outputs.environment != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.verify.outputs.apps) }}
+    runs-on: ${{ inputs.strategy == 'github' && 'ubuntu-latest' || 'ci-small' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        if: ${{ inputs.primitives-ref == '' }}
+        with:
+          install_args: node npm:@plexus-ms/cli-ci
+      - uses: actions/checkout@v7
+        if: ${{ inputs.primitives-ref != '' }}
+        with:
+          repository: plexus-ms/primitives
+          ref: ${{ inputs.primitives-ref }}
+          path: .plx-ci
+      - uses: actions/setup-node@v7
+        if: ${{ inputs.primitives-ref != '' }}
+        with:
+          node-version-file: .plx-ci/mise.toml
+      - name: plx-ci from the unreleased primitives
+        if: ${{ inputs.primitives-ref != '' }}
+        run: |
+          cd .plx-ci && corepack enable && pnpm install --frozen-lockfile --ignore-scripts >/dev/null
+          pnpm --filter @plexus-ms/cli-ci... run build >/dev/null
+          mkdir -p bin && ln -sf "$PWD/packages/cli-ci/dist/plx-ci.js" bin/plx-ci && echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Load the registry's keys from the vault
+        if: ${{ inputs.registry == 'own' }}
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
+          REGISTRY_ENDPOINT: op://${{ env.VAULT }}/bucket-registry/endpoint
+          REGISTRY_REGION: op://${{ env.VAULT }}/bucket-registry/region
+          REGISTRY_ACCESS_KEY: op://${{ env.VAULT }}/bucket-registry/access-key-id
+          REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
+      # Into the job's home, not /usr/local: a small or medium slot of a runner
+      # host (ci_runner_host) runs with no-new-privileges, so sudo is no option.
+      - name: Install exo and crane
+        run: |
+          mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://github.com/exoscale/cli/releases/download/v${EXO_VERSION}/exoscale-cli_${EXO_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/.local/bin" exo
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz -C "$HOME/.local/bin" crane
+      - name: Log in to the forge's registry
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GITHUB_TOKEN" | crane auth login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: The registry
+        run: plx-ci registry
+      - name: Publish
+        env:
+          TEST: ${{ matrix.test }}
+        run: plx-ci publish "${{ matrix.app }}" "${{ matrix.hash }}" "$GITHUB_SHA" ${TEST:+--test "$TEST"}
+
+  # One deploy per app with a target in the environment; an app without a
+  # record there has no deployment there, which the plan said.
+  deploy:
+    needs: [verify, publish]
+    if: ${{ always() && needs.publish.result == 'success' && needs.verify.outputs.deploys != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.verify.outputs.deploys) }}
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      strategy: ${{ inputs.strategy }}
+      tenant: ${{ inputs.tenant }}
+      app: ${{ matrix.app }}
+      image-ref: ${{ matrix.image }}
+      host: ${{ matrix.host }}
+      environment: ${{ needs.verify.outputs.environment }}
+      overlay: ${{ inputs.overlay }}
+      vault: ${{ inputs.vault }}
+      dry-run: ${{ inputs.dry-run }}
+      primitives-ref: ${{ inputs.primitives-ref }}
+    secrets:
+      op-service-account-token: ${{ secrets.op-service-account-token }}
