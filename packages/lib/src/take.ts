@@ -36,6 +36,8 @@ export interface Summary {
   resting: { path: string; reason: string }[];
   /** The pull requests opened or updated, one per consumer that changed. */
   pulls: string[];
+  /** Those of `pulls` whose repo merged clean at every site and failed nowhere: ready to merge once their checks pass. */
+  mergeable: string[];
 }
 
 /** True when nothing in the summary needs a human but the pull requests. */
@@ -50,6 +52,7 @@ export function mergeSummary(into: Summary, from: Summary): void {
   into.skipped.push(...from.skipped);
   into.resting.push(...from.resting);
   into.pulls.push(...from.pulls);
+  into.mergeable.push(...from.mergeable);
 }
 
 export const emptySummary = (train: string, preview: boolean): Summary => ({
@@ -61,7 +64,15 @@ export const emptySummary = (train: string, preview: boolean): Summary => ({
   skipped: [],
   resting: [],
   pulls: [],
+  mergeable: [],
 });
+
+/** What a pull request's body says when nothing in it needs a hand; read back to tell a clean one found on origin. */
+export const CLEAN_BODY = 'Merged clean at every site.';
+
+/** The entries of a summary list that belong to a consumer: itself, its sites, its lockfile. */
+const ofConsumer = (list: string[], consumer: Consumer): string[] =>
+  list.filter((p) => p === consumer.rel || p.startsWith(`${consumer.rel}/`));
 
 export const trainBranch = (train: string): string => `plexus/${train}`;
 
@@ -329,19 +340,22 @@ async function openPull(ctx: Context, consumer: Consumer, dir: string, take: Tak
     summary.failed.push(consumer.rel);
     return;
   }
+  const conflicted = ofConsumer(summary.conflicted, consumer);
+  const failed = ofConsumer(summary.failed, consumer);
+  const clean = conflicted.length === 0 && failed.length === 0;
   const existing = await openPullUrl(ctx, consumer, dir, train);
   if (existing) {
     ctx.say(`• ${consumer.rel}: pull request updated: ${existing}`);
     summary.pulls.push(existing);
+    if (clean) summary.mergeable.push(existing);
     return;
   }
   const sites = consumer.sites.map((s) => s.rel);
-  const conflicted = sites.filter((s) => summary.conflicted.includes(s));
   const body = [
     `Train ${train} (§ 1.5 PLX): \`copier update\` at ${sites.join(', ')}, the marker, the lockfile where manifests moved, and the workflow refs.`,
-    conflicted.length > 0
-      ? `Conflicts to resolve, committed with their markers: ${conflicted.join(', ')}.`
-      : 'Merged clean at every site.',
+    ...(conflicted.length > 0 ? [`Conflicts to resolve, committed with their markers: ${conflicted.join(', ')}.`] : []),
+    ...(failed.length > 0 ? [`Failed, and left as it was: ${failed.join(', ')}.`] : []),
+    ...(clean ? [CLEAN_BODY] : []),
     `Opened by ${take.opener}${take.why ? `: ${take.why}` : ''}.`,
   ].join('\n\n');
   try {
@@ -371,6 +385,7 @@ async function openPull(ctx: Context, consumer: Consumer, dir: string, take: Tak
   const url = await openPullUrl(ctx, consumer, dir, train);
   ctx.say(`• ${consumer.rel}: pull request opened${url ? `: ${url}` : ''}`);
   summary.pulls.push(url || `${consumer.rel} ${branch}`);
+  if (url && clean) summary.mergeable.push(url);
 }
 
 export const detail = (error: unknown): string => {

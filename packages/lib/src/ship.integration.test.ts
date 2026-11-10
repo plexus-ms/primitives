@@ -130,6 +130,7 @@ case "$1 $2" in
       *"/releases") for f in "$dir"/release-*; do [ -f "$f" ] || continue; v="\${f##*/release-}"; [ ! -f "$dir/draft-$v" ] || continue; echo "$v $(cat "$dir/date-$v" 2>/dev/null || echo 2026-01-01T00:00:00Z)"; done ;;
       *) ls "$dir"/release-* 2>/dev/null | tail -1 | xargs -r cat ;;
     esac ;;
+  "pr view") for f in "$dir"/pr-plexus-*; do case "$f" in *.body|*.base) continue ;; esac; [ -f "$f" ] && [ "$(cat "$f")" = "$3" ] && cat "$f.body"; done ;;
   "pr list") f="$dir/pr-$(arg --head "$@" | tr / -)"; [ ! -f "$f" ] || cat "$f" ;;
   "pr create")
     head="$(arg --head "$@")"; f="$dir/pr-$(echo "$head" | tr / -)"
@@ -518,6 +519,7 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
     skipped: [],
     resting: [],
     pulls: [],
+    mergeable: [],
     released: true,
   });
 });
@@ -636,6 +638,7 @@ test('happy path: primitives first, the npm wait, the rest, and no pull request 
     skipped: [],
     resting: [],
     pulls: [],
+    mergeable: [],
     released: true,
   });
 });
@@ -706,6 +709,7 @@ test('propagate: every repo under the directory takes the train in a worktree of
     skipped: [],
     resting: [],
     pulls: ['https://forge/acme-platform/pull/1', 'https://forge/acme-web/pull/1'],
+    mergeable: ['https://forge/acme-platform/pull/1', 'https://forge/acme-web/pull/1'],
   });
 });
 
@@ -931,6 +935,8 @@ test('propagate: a failing site does not stop the others, and the summary says s
   assert.match(onTrain('acme-platform', '0.2.0', 'template-owned.txt'), /generated/, 'failed site left as it was');
   assert.ok(has(out, '✗ FAILED — copier update exited nonzero: fake copier: failing on purpose'));
   assert.deepEqual(result?.failed, ['acme/platform']);
+  assert.deepEqual(result?.mergeable, ['https://forge/acme-web/pull/1'], 'a repo with a failed site is not offered');
+  assert.match(pull('acme-platform', '0.2.0', '.body'), /Failed, and left as it was: acme\/platform\./);
   assert.deepEqual(result?.clean, ['acme/web', 'acme/web/apps/site']);
 });
 
@@ -946,6 +952,12 @@ test('propagate: a conflict is committed with its markers and the pull request s
   assert.match(onTrain('acme-web', '0.2.0', 'apps/site/template-owned.txt'), /^<<<<<<< /m, 'markers in the branch');
   assert.match(pull('acme-web', '0.2.0', '.body'), /Conflicts to resolve.*acme\/web\/apps\/site/);
   assert.equal(result?.pulls.length, 2, 'the pull request is opened all the same');
+  assert.deepEqual(
+    result?.mergeable,
+    ['https://forge/acme-platform/pull/1'],
+    'only the clean one is offered for merging',
+  );
+  assert.doesNotMatch(pull('acme-web', '0.2.0', '.body'), /Merged clean/);
 });
 
 test('propagate: a conflict at the repo root does not stop its apps', async () => {
@@ -1033,6 +1045,7 @@ test('update: a repo takes the newest train itself, in a worktree, and leaves it
     skipped: [],
     resting: [],
     pulls: ['https://forge/acme-web/pull/1'],
+    mergeable: ['https://forge/acme-web/pull/1'],
   });
 
   // The next day: the branch is on origin, so nothing moves it.
@@ -1041,6 +1054,11 @@ test('update: a repo takes the newest train itself, in a worktree, and leaves it
   assert.ok(has(again.out, 'web: plexus/0.2.0 is already on origin (https://forge/acme-web/pull/1) — nothing to do'));
   assert.equal(copierRuns().length, 2, 'copier not run again');
   assert.deepEqual(again.result?.pulls, ['https://forge/acme-web/pull/1']);
+  assert.deepEqual(
+    again.result?.mergeable,
+    ['https://forge/acme-web/pull/1'],
+    'found on origin, and its body says clean',
+  );
   assert.deepEqual(again.result?.clean, []);
 });
 

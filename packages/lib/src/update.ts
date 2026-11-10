@@ -45,7 +45,7 @@ import { catalogOf, MANIFEST_FILE, parseManifest } from './manifest.ts';
 import { MARKER_FILE, parseMarker } from './marker.ts';
 import { type Marked, maxAgeOf, needOf, type Release, type Stale, staleModules } from './need.ts';
 import { overview } from './overview.ts';
-import { detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './take.ts';
+import { CLEAN_BODY, detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './take.ts';
 import { COMPENDIUM, isTrainVersion, preflightForge, UsageError } from './train.ts';
 
 export interface UpdateOptions {
@@ -118,7 +118,14 @@ export async function update(ctx: Context, options: UpdateOptions): Promise<Summ
     ctx.say(
       `• ${name}: ${branch} is already on origin${url ? ` (${url})` : ''} — nothing to do; delete the branch to pull the train again`,
     );
-    if (url) summary.pulls.push(url);
+    if (url) {
+      summary.pulls.push(url);
+      // Whether it merged clean is what its body says (take.ts wrote it).
+      const body = await ctx
+        .read('gh', ['pr', 'view', url, '--json', 'body', '--jq', '.body'], { cwd: repo })
+        .catch(() => '');
+      if (body.includes(CLEAN_BODY)) summary.mergeable.push(url);
+    }
     return summary;
   }
 
