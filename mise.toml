@@ -83,7 +83,7 @@ usage = 'arg "[package]" help="Package to check (defaults to all)"'
 run = 'turbo run check ${usage_package:+--filter=$usage_package}'
 
 [tasks.check-ops]
-description = "actionlint over the workflows; ansible-lint over the collections, a syntax check of their playbooks and of a playbook that lists every role"
+description = "actionlint over the workflows; ansible-lint over the collections (their Galaxy dependencies installed on first use), a syntax check of their playbooks and of a playbook that lists every role"
 hide = true
 run = [
     'actionlint',
@@ -95,7 +95,9 @@ run = [
 ]
 # ANSIBLE_HOME keeps ansible-lint's cache and every collections path inside the
 # project, so a plexus.* collection installed user-wide (a tenant's pin) never
-# shadows the checkout.
+# shadows the checkout. That path is therefore the only one: link-collections.sh
+# puts the four plexus.* collections there and installs what their galaxy.yml
+# files depend on, which no other path would supply.
 env = { ANSIBLE_HOME = "{{config_root}}/.ansible", ANSIBLE_COLLECTIONS_PATH = "{{config_root}}/.ansible/collections" }
 
 [tasks.test]
