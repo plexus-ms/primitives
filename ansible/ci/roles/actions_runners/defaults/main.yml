@@ -67,7 +67,7 @@ actions_runners_extra_labels: []
 # or builds it (below). A new pin reaches each slot when its current
 # container ends; `systemctl restart ci-runner@<slot>` takes it at once,
 # cutting off a job the slot is running.
-actions_runners_image: ghcr.io/plexus-ms/ci-runner:0.114.0
+actions_runners_image: ghcr.io/plexus-ms/ci-runner:0.115.0
 # Build the image on the host from the Dockerfile this role ships
 # (files/ci-runner) instead of pulling it, tagged actions_runners_image: a
 # trial of an unreleased role, or a tenant that wants no upstream registry
