@@ -78,6 +78,17 @@ export {
   shortRemote,
   type TemplateFacet,
 } from './model.ts';
+export {
+  DEFAULT_MAX_AGE,
+  MAX_AGE_ANSWER,
+  maxAgeOf,
+  type Need,
+  type NeedInput,
+  needOf,
+  parseMaxAge,
+  type Release,
+  type Trigger,
+} from './need.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';
 export { isClean, propagate, type Summary } from './propagate.ts';
 export {

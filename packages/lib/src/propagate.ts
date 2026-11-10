@@ -46,6 +46,8 @@ export interface Summary {
   failed: string[];
   /** Consumers left untouched, with the reason. */
   skipped: { path: string; reason: string }[];
+  /** Repos that need no train yet and rest on the one they have (need.ts), with what would end the rest. */
+  resting: { path: string; reason: string }[];
   /** The pull requests opened or updated, one per consumer that changed. */
   pulls: string[];
 }
@@ -61,6 +63,7 @@ export const emptySummary = (train: string, preview: boolean): Summary => ({
   conflicted: [],
   failed: [],
   skipped: [],
+  resting: [],
   pulls: [],
 });
 
@@ -78,6 +81,8 @@ export interface Take {
   ref?: string;
   /** Who opened the pull request, named in its body. */
   opener: string;
+  /** Why the repo takes the train now (need.ts), named in the body beside the opener. */
+  why?: string;
 }
 
 /**
@@ -380,7 +385,7 @@ async function openPull(ctx: Context, consumer: Consumer, dir: string, take: Tak
     conflicted.length > 0
       ? `Conflicts to resolve, committed with their markers: ${conflicted.join(', ')}.`
       : 'Merged clean at every site.',
-    `Opened by ${take.opener}.`,
+    `Opened by ${take.opener}${take.why ? `: ${take.why}` : ''}.`,
   ].join('\n\n');
   try {
     await ctx.apply([

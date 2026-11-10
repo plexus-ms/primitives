@@ -17,7 +17,8 @@
 // and, on primitives, "publishes" the train to the fake registry. Knobs:
 //   FAKE_GH_LOGGED_OUT=1              `gh auth status` fails
 //   FAKE_GH_MUTABLE=1                 releases are created mutable
-// `api repos/<o>/<r>/releases/latest` answers the newest release of that repo.
+// `api repos/<o>/<r>/releases` lists that repo's releases as "<tag> <date>",
+// the date from `releaseOf` (default: 2026-01-01, the fixture's epoch).
 // Fake npm: `npm view <pkg>@<v> version` answers once primitives' release of
 // v exists and FAKE_NPM_POLLS polls have gone by; FAKE_NPM_NEVER=1 never answers.
 // Every invocation is appended to FAKE_LOG.
@@ -109,7 +110,7 @@ case "$1 $2" in
   "api "*)
     case "$2" in
       *"/releases/tags/"*) cat "$dir/release-\${2##*/}" ;;
-      *"/releases/latest") ls "$dir" | sed -n 's/^release-//p' | sort -V | tail -1 ;;
+      *"/releases") for f in "$dir"/release-*; do [ -f "$f" ] || continue; v="\${f##*/release-}"; echo "$v $(cat "$dir/date-$v" 2>/dev/null || echo 2026-01-01T00:00:00Z)"; done ;;
       *) ls "$dir"/release-* 2>/dev/null | tail -1 | xargs -r cat ;;
     esac ;;
   "pr list") f="$dir/pr-$(arg --head "$@" | tr / -)"; [ ! -f "$f" ] || cat "$f" ;;
@@ -334,16 +335,19 @@ async function runUpdate(options: Options, args: UpdateOptions): Promise<UpdateR
   const io = { ...realIo(), stdout: new PassThrough(), stderr };
   const ctx = new Context(options, io);
   try {
-    return { result: await update(ctx, args), out };
+    // The clock: two months past the fixture's epoch, so a release without a
+    // date of its own is older than the backstop and the train is taken.
+    return { result: await update(ctx, { today: '2026-03-01', ...args }), out };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error), out };
   }
 }
 
 /** A release of a train repo on the fake forge, as ship would have created it. */
-const releaseOf = (r: string, v: string) => {
+const releaseOf = (r: string, v: string, date?: string) => {
   mkdirSync(join(FORGE(), r), { recursive: true });
   writeFileSync(join(FORGE(), r, `release-${v}`), 'true\n');
+  if (date) writeFileSync(join(FORGE(), r, `date-${v}`), `${date}T00:00:00Z\n`);
 };
 
 const tagged = (r: string, v: string) => {
@@ -452,6 +456,7 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
     conflicted: [],
     failed: [],
     skipped: [],
+    resting: [],
     pulls: [],
     released: true,
   });
@@ -828,7 +833,10 @@ test('update: a repo takes the newest train itself, in a worktree, and leaves it
   assert.match(onTrain('acme-web', '0.2.0', '.github/workflows/ci.yml'), /pipeline\.yml@0\.2\.0/, 'refs bumped');
   assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'), '1', 'one commit');
   assert.equal(pull('acme-web', '0.2.0', '.base'), 'develop');
-  assert.match(pull('acme-web', '0.2.0', '.body'), /Opened by `plx update`/);
+  assert.match(
+    pull('acme-web', '0.2.0', '.body'),
+    /Opened by `plx update`: 0\.2\.0, the oldest train not taken, was cut 59 days ago \(backstop: 30 days; 1 newer train\)\./,
+  );
   assert.equal(git(web, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature/x', 'checkout still on its branch');
   assert.match(read(join(web, 'template-owned.txt')), /^generated$/m, 'checkout not updated');
   assert.ok(existsSync(join(web, 'notes.txt')), 'local file kept');
@@ -840,6 +848,7 @@ test('update: a repo takes the newest train itself, in a worktree, and leaves it
     conflicted: [],
     failed: [],
     skipped: [],
+    resting: [],
     pulls: ['https://forge/acme-web/pull/1'],
   });
 
@@ -913,4 +922,90 @@ test('update: a conflict is committed with its markers, the pull request opened,
   assert.deepEqual(result?.clean, ['web']);
   assert.match(onTrain('acme-web', '0.2.0', 'apps/site/template-owned.txt'), /^<<<<<<< /m);
   assert.match(pull('acme-web', '0.2.0', '.body'), /Conflicts to resolve.*web\/apps\/site/);
+});
+
+test('update: a repo rests while no trigger holds, and takes the newest train once the backstop age is exceeded', async () => {
+  fixture('update-rest');
+  releaseOf('preset-repo-turbo', '0.1.0', '2026-01-01');
+  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-10');
+  releaseOf('preset-repo-turbo', '0.3.0', '2026-02-25');
+  const web = join(WS, 'acme/web');
+  const rest = await runUpdate({ yes: true }, { repo: web });
+  assert.equal(rest.error, undefined, rest.out);
+  assert.ok(
+    has(
+      rest.out,
+      '• web: rests — 2 newer trains, the oldest (0.2.0) cut 19 days ago; the backstop is 30 days (plx update --now takes 0.3.0)',
+    ),
+    rest.out,
+  );
+  assert.equal(copierRuns().length, 0, 'copier not run');
+  assert.equal(git(web, 'worktree', 'list').split('\n').length, 1, 'no worktree made');
+  assert.ok(!fakeLog().some((l) => has(l, 'pr create')), 'no pull request');
+  assert.deepEqual(rest.result?.resting, [
+    { path: 'web', reason: '2 newer trains, the oldest (0.2.0) cut 19 days ago; the backstop is 30 days' },
+  ]);
+  assert.deepEqual(rest.result?.pulls, []);
+
+  // Eleven days on, the oldest train not taken is 30 days old: the newest is taken, over the one between.
+  const due = await runUpdate({ yes: true }, { repo: web, today: '2026-03-12' });
+  assert.equal(due.error, undefined, due.out);
+  assert.ok(has(due.out, '• web: takes 0.3.0 — 0.2.0, the oldest train not taken, was cut 30 days ago'), due.out);
+  assert.match(onTrain('acme-web', '0.3.0', 'template-owned.txt'), /updated from 0\.3\.0/);
+  assert.throws(() => onTrain('acme-web', '0.2.0', 'template-owned.txt'), 'the train between is jumped');
+  assert.match(pull('acme-web', '0.3.0', '.body'), /backstop: 30 days; 2 newer trains/);
+  assert.deepEqual(due.result?.resting, []);
+});
+
+test('update: asking takes the train whatever its age, by --now or by naming it', async () => {
+  fixture('update-asked');
+  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-28');
+  releaseOf('preset-repo-operations', '0.2.0', '2026-02-28');
+  const web = join(WS, 'acme/web');
+  const rest = await runUpdate({ yes: true }, { repo: web });
+  assert.ok(has(rest.out, '• web: rests — 1 newer train, the oldest (0.2.0) cut 1 day ago'), rest.out);
+  const now = await runUpdate({ yes: true }, { repo: web, now: true });
+  assert.equal(now.error, undefined, now.out);
+  assert.ok(has(now.out, '• web: takes 0.2.0 — asked for (--now)'), now.out);
+  assert.match(pull('acme-web', '0.2.0', '.body'), /Opened by `plx update`: asked for \(--now\)\./);
+
+  const plat = join(WS, 'acme/platform');
+  const named = await runUpdate({ yes: true }, { repo: plat, train: '0.2.0' });
+  assert.equal(named.error, undefined, named.out);
+  assert.ok(!fakeLog().some((l) => has(l, 'gh[preset-repo-operations] api')), 'a named train asks the forge for none');
+  assert.match(pull('acme-platform', '0.2.0', '.body'), /asked for \(--train 0\.2\.0\)/);
+});
+
+test('update: the backstop age is the answer of the repo preset, zero takes every train, and the option overrides both', async () => {
+  fixture('update-age');
+  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-28');
+  releaseOf('preset-repo-operations', '0.2.0', '2026-02-20');
+  // The platform repo's answers set a week: nine days is past it.
+  const plat = join(WS, 'acme/platform');
+  put(
+    join(plat, '.copier-answers.yml'),
+    '_commit: 0.1.0\n_src_path: gh:plexus-ms/preset-repo-operations\nupdate_max_age: 7\n',
+  );
+  commit(plat, 'a week at most');
+  const week = await runUpdate({ yes: true }, { repo: plat });
+  assert.equal(week.error, undefined, week.out);
+  assert.ok(has(week.out, 'was cut 9 days ago (backstop: 7 days; 1 newer train)'), week.out);
+
+  // The web repo's say nothing: 30 days, so it rests; zero is the eager repo.
+  const web = join(WS, 'acme/web');
+  const rest = await runUpdate({ yes: true }, { repo: web });
+  assert.ok(has(rest.out, 'the backstop is 30 days'), rest.out);
+  const long = await runUpdate({ yes: true }, { repo: web, maxAge: 90, today: '2026-04-15' });
+  assert.ok(has(long.out, 'cut 46 days ago; the backstop is 90 days'), long.out);
+  put(
+    join(web, '.copier-answers.yml'),
+    '_commit: 0.1.0\n_src_path: gh:plexus-ms/preset-repo-turbo\nupdate_max_age: soon\n',
+  );
+  const bad = await runUpdate({ yes: true }, { repo: web });
+  assert.match(bad.error ?? '', /the answer update_max_age is 'soon', not a whole number of days/);
+  git(web, 'checkout', '--quiet', '.copier-answers.yml');
+
+  const eager = await runUpdate({ yes: true }, { repo: web, maxAge: 0 });
+  assert.equal(eager.error, undefined, eager.out);
+  assert.ok(has(eager.out, '• web: takes 0.2.0 — a backstop age of zero takes every train (1 newer train)'), eager.out);
 });

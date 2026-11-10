@@ -10,6 +10,7 @@ test('renderSummary lists every site and ends with the verdict', () => {
     conflicted: [],
     failed: [],
     skipped: [],
+    resting: [] as { path: string; reason: string }[],
     pulls: ['https://github.com/acme/web/pull/7'],
   };
   assert.equal(
@@ -35,4 +36,20 @@ test('renderSummary lists every site and ends with the verdict', () => {
   assert.match(bad, /^ {2}⚠ skipped: {4}acme\/platform \(has uncommitted changes\)$/m);
   assert.match(bad, /^✗ needs attention/m);
   assert.doesNotMatch(bad, /✓ done/);
+  const resting = renderSummary(
+    {
+      ...base,
+      clean: [],
+      pulls: [],
+      resting: [{ path: 'web', reason: '1 newer train, the oldest (0.2.0) cut 3 days ago' }],
+    },
+    '',
+  );
+  assert.match(resting, /^ {2}• resting: {4}web \(1 newer train, the oldest \(0\.2\.0\) cut 3 days ago\)$/m);
+  assert.match(resting, /^✓ done — no pull request$/m, 'a resting repo needs nobody');
+  assert.doesNotMatch(
+    renderSummary({ ...base, preview: true, clean: [], pulls: [], resting: [{ path: 'web', reason: 'r' }] }, 'real'),
+    /run it for real/,
+    'a resting dry run names no command that would take the train',
+  );
 });

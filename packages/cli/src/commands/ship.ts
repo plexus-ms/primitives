@@ -38,13 +38,16 @@ export function renderSummary(s: Summary, realCommand: string, verb = 'propagate
   for (const p of s.conflicted) lines.push(`  ✗ conflicts:  ${p}`);
   for (const p of s.failed) lines.push(`  ✗ failed:     ${p}`);
   for (const { path, reason } of s.skipped) lines.push(`  ⚠ skipped:    ${path} (${reason})`);
+  for (const { path, reason } of s.resting) lines.push(`  • resting:    ${path} (${reason})`);
   for (const url of s.pulls) lines.push(`  → pull:       ${url}`);
   const clean = isClean(s);
-  if (s.preview) {
+  // A run that took no train (resting, already there) has nothing to run for real.
+  const idle = clean && s.clean.length === 0 && s.pulls.length === 0;
+  if (s.preview && !idle) {
     lines.push('  (preview only — nothing was changed)');
     if (clean) lines.push(`✓ dry run clean — run it for real: ${realCommand}`);
   } else if (clean) {
-    lines.push('✓ done — review and merge the pull requests');
+    lines.push(s.pulls.length > 0 ? '✓ done — review and merge the pull requests' : '✓ done — no pull request');
   }
   if (!clean) lines.push(`✗ needs attention — see above; fix the consumer, then re-run ${verb}`);
   return lines.join('\n');
