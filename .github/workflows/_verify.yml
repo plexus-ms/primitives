@@ -27,7 +27,7 @@ name: _verify
 # Everything else is read from the vault `<owner>-ci` (§ 3 PLX-Secrets): the
 # apps' build-time keys always; the object-storage keys with a registry of
 # the tenant's own; the cloud keys, the relay and the GitHub App under
-# hybrid; the App also where the run plans a deploy, to read the platform
+# hybrid; the App also where the run plans a deploy, to read the operations
 # repo's inventory.
 
 on:
@@ -71,6 +71,11 @@ on:
         required: false
         type: string
         default: ''
+      operations-repo:
+        description: With `deploy`, the tenant's operations repo whose inventory holds the deploy targets (PLX-Environment), by its name in the owner's org; PLX-Tenancy names it `operations`.
+        required: false
+        type: string
+        default: operations
       alerts-email:
         description: Hybrid, the address mailed when an instance misses its boot and is kept; empty for no mail. A preset answer, never a vault item (§ 3 PLX-Secrets).
         required: false
@@ -207,30 +212,30 @@ jobs:
         run: printf '%s' "$GITHUB_TOKEN" | crane auth login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: The registry
         run: plx-ci registry
-      # Where each app deploys is the platform repo's inventory
+      # Where each app deploys is the operations repo's inventory
       # (PLX-Environment), checked out with the tenant's App.
-      - name: A token that may read the platform repo
-        id: platform
+      - name: A token that may read the operations repo
+        id: operations
         if: ${{ inputs.deploy }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ env.APP_CLIENT_ID }}
           private-key: ${{ env.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: platform
+          repositories: ${{ inputs.operations-repo }}
           permission-contents: read
       - uses: actions/checkout@v7
         if: ${{ inputs.deploy }}
         with:
-          repository: ${{ github.repository_owner }}/platform
-          token: ${{ steps.platform.outputs.token }}
-          path: platform
+          repository: ${{ github.repository_owner }}/${{ inputs.operations-repo }}
+          token: ${{ steps.operations.outputs.token }}
+          path: operations
       - name: Plan
         id: plan
         env:
           DEPLOY: ${{ inputs.deploy && 'yes' || '' }}
           ENVIRONMENT: ${{ inputs.environment }}
-        run: plx-ci plan --test ${DEPLOY:+--deploy --environment "$ENVIRONMENT" --inventory platform/inventory}
+        run: plx-ci plan --test ${DEPLOY:+--deploy --environment "$ENVIRONMENT" --inventory operations/inventory}
       # Hybrid: one instance per image to build and per test to run, created
       # at once, each waited for until its runner is online. One that misses
       # is kept, stopped and mailed about, and replaced once.
