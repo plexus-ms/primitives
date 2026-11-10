@@ -1,16 +1,18 @@
 name: _update
 
-# Mounts the update verb (§ 3 PLX-Updates): the repo takes the train itself.
-# `plx update` asks the forge for the preset's newest release, runs copier
-# update at every site in a worktree of the branch the train lands on, syncs
-# the marker, refreshes the lockfile, moves the workflow refs, and opens the
-# pull request on `plexus/<version>`, the same one `plx ship` opens from the
-# maintainers' workspace; whichever arrives first opens it, the other finds
-# the branch and leaves it. A branch already on origin is never moved, so a
-# scheduled run cannot overwrite a conflict somebody is resolving. The caller
-# pins plx in its mise.toml, so the pull is made by the tool of the train the
-# repo is on; a change to the pull itself therefore takes effect one train
-# late.
+# Mounts the update verb (§ 3 PLX-Updates): the repo takes the train itself,
+# when it needs one and not whenever one is cut. `plx update` asks the forge
+# for the preset's releases and decides: it takes the newest train when it is
+# asked (`now`, or a `train` named) or when the oldest train the repo has not
+# taken is older than the backstop age (the repo's answer `update_max_age`, 30
+# days unless it says otherwise); otherwise the repo rests, and the run says
+# why in one line and ends green. Taking a train is copier update at every
+# site in a worktree of the branch the train lands on, the marker, the
+# lockfile, the workflow refs, and the pull request on `plexus/<version>`. A
+# branch already on origin is never moved, so a scheduled run cannot overwrite
+# a conflict somebody is resolving. The caller pins plx in its mise.toml, so
+# the pull is made by the tool of the train the repo rests on; a change to the
+# pull itself therefore takes effect one pull late.
 #
 # The push and the pull request are made with a token minted for a GitHub App
 # of the tenant's own (`app_id` and `app_private_key`: contents and pull
@@ -27,6 +29,13 @@ on:
         required: false
         type: string
         default: ''
+      now:
+        description: >-
+          Take the newest train whatever the triggers say: somebody asks. The
+          callers pass true on their manual trigger and false on the schedule.
+        required: false
+        type: boolean
+        default: false
       strategy:
         description: >-
           Where the job runs (§ 8 PLX-Delivery): `github`, the forge's runners;
@@ -72,7 +81,7 @@ jobs:
           token: ${{ steps.app.outputs.token || secrets.token || github.token }}
       - uses: jdx/mise-action@v5
       - run: command -v gh >/dev/null || mise use --global gh@latest
-      - run: plx -y update ${{ inputs.train != '' && format('--train {0}', inputs.train) || '' }}
+      - run: plx -y update ${{ inputs.train != '' && format('--train {0}', inputs.train) || '' }} ${{ inputs.now && '--now' || '' }}
         env:
           GH_TOKEN: ${{ steps.app.outputs.token || secrets.token || github.token }}
           GIT_AUTHOR_NAME: plx[bot]
