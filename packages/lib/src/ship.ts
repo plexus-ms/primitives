@@ -11,7 +11,9 @@
 //   → phase two: the presets' and the compendium's bookkeeping (collection
 //     pin, workflow refs, plx pins, the config pin and catalog entry, the map's version and
 //     timestamp, `changed` on every standard module whose requirements moved),
-//     commit, tag, push, release, repo by repo
+//     commit, tag, push, release, repo by repo; the compendium last, its
+//     release created as a draft, given the train manifest (manifest.ts) and
+//     only then published, because an immutable release locks its assets
 //
 // and there it ends. Cutting a train and a repo taking it are separate events
 // (§ 3 PLX-Updates): ship looks for no consumer and opens no pull request; a
@@ -52,14 +54,17 @@ import {
   today as todayOf,
   WORKFLOW_REF,
 } from './bookkeeping.ts';
+import { readCatalog } from './catalog.ts';
 import type { Context } from './context.ts';
 import { type Plan, run, write } from './effects.ts';
 import { frontmatterField } from './frontmatter.ts';
+import { buildManifest, MANIFEST_FILE, renderManifest } from './manifest.ts';
 import { previewConsumers } from './preview.ts';
 import { extractRequirements, MAP_PAGE, modulePages } from './requirements.ts';
 import { preflightSelf } from './self.ts';
 import { emptySummary, type Summary } from './take.ts';
 import {
+  COMPENDIUM,
   PRIMITIVES,
   phasesOf,
   preflightForge,
@@ -168,10 +173,10 @@ const PENDING_SHOWN = 20;
 async function releasePhase(ctx: Context, train: Train, repos: TrainRepo[], next: string, today: string) {
   ctx.say(`→ phase: ${repos.map((r) => r.name).join(', ')}`);
   await ctx.apply(await planBookkeeping(ctx, train, repos, next, today));
-  for (const repo of repos) await tagAndRelease(ctx, repo, next);
+  for (const repo of repos) await tagAndRelease(ctx, repo, next, today);
 }
 
-async function tagAndRelease(ctx: Context, repo: TrainRepo, next: string): Promise<void> {
+async function tagAndRelease(ctx: Context, repo: TrainRepo, next: string, today: string): Promise<void> {
   const tagged = await ctx
     .read('git', ['rev-parse', '-q', '--verify', `refs/tags/${next}`], { cwd: repo.path })
     .then(() => true)
@@ -183,17 +188,20 @@ async function tagAndRelease(ctx: Context, repo: TrainRepo, next: string): Promi
   // The GitHub release is what makes the tag immutable, and on primitives it
   // is what triggers the publish: nothing is ever published from a tag that
   // can still move. --verify-tag refuses to create a tag of its own.
-  const released = await ctx
-    .read('gh', ['release', 'view', next], { cwd: repo.path })
-    .then(() => true)
-    .catch(() => false);
-  if (released) {
-    ctx.say(`• ${repo.name}: release ${next} exists`);
-    return;
+  const create = ['release', 'create', next, '--verify-tag', '--generate-notes', '--title', next];
+  if (repo.name === COMPENDIUM) {
+    if (!(await releaseWithManifest(ctx, repo, next, today, create))) return;
+  } else {
+    const released = await ctx
+      .read('gh', ['release', 'view', next], { cwd: repo.path })
+      .then(() => true)
+      .catch(() => false);
+    if (released) {
+      ctx.say(`• ${repo.name}: release ${next} exists`);
+      return;
+    }
+    await ctx.apply([run('gh', create, { cwd: repo.path })]);
   }
-  await ctx.apply([
-    run('gh', ['release', 'create', next, '--verify-tag', '--generate-notes', '--title', next], { cwd: repo.path }),
-  ]);
   if (ctx.dryRun) return;
   const immutable = (
     await ctx.read('gh', ['api', `repos/{owner}/{repo}/releases/tags/${next}`, '--jq', '.immutable'], {
@@ -202,6 +210,51 @@ async function tagAndRelease(ctx: Context, repo: TrainRepo, next: string): Promi
   ).trim();
   if (immutable !== 'true')
     throw new Error(mutableRelease(`${repo.name}: release ${next} was created mutable, and its tag can still move`));
+}
+
+/**
+ * The compendium's release carries the train manifest, and an immutable
+ * release locks its assets: so the release is created as a draft, the manifest
+ * uploaded to it, and only then published. Until then the train does not show
+ * to a repo asking for the trains (update.ts). A draft left by a run that
+ * stopped is taken up where it stands: the manifest uploaded again, then
+ * published. Resolves false when the release was published already.
+ */
+async function releaseWithManifest(
+  ctx: Context,
+  repo: TrainRepo,
+  next: string,
+  today: string,
+  create: string[],
+): Promise<boolean> {
+  const state = (
+    await ctx
+      .read('gh', ['release', 'view', next, '--json', 'isDraft', '--jq', '.isDraft'], { cwd: repo.path })
+      .catch(() => '')
+  ).trim();
+  if (state === 'false') {
+    ctx.say(`• ${repo.name}: release ${next} exists`);
+    return false;
+  }
+  if (state === 'true') ctx.say(`• ${repo.name}: release ${next} is still a draft — finishing it`);
+  else await ctx.apply([run('gh', [...create, '--draft'], { cwd: repo.path })]);
+
+  // Written from the checkout the tag was cut from, stamps included; under a
+  // dry run the stamps are only announced, so the upload is too.
+  const scratch = (await ctx.stage(run('mktemp', ['-d'])))?.trim() ?? '';
+  const file = join(scratch, MANIFEST_FILE);
+  try {
+    const manifest = buildManifest(await readCatalog(ctx, repo.path), next, today);
+    ctx.say(`  ${repo.name}: ${MANIFEST_FILE}: train ${next}, ${manifest.modules.length} modules`);
+    await ctx.stage(write(file, renderManifest(manifest)));
+    await ctx.apply([
+      run('gh', ['release', 'upload', next, file, '--clobber'], { cwd: repo.path }),
+      run('gh', ['release', 'edit', next, '--draft=false'], { cwd: repo.path }),
+    ]);
+  } finally {
+    if (scratch) await ctx.stage(run('rm', ['-rf', scratch]));
+  }
+  return true;
 }
 
 /**

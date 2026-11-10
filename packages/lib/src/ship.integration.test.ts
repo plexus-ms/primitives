@@ -17,8 +17,12 @@
 // and, on primitives, "publishes" the train to the fake registry. Knobs:
 //   FAKE_GH_LOGGED_OUT=1              `gh auth status` fails
 //   FAKE_GH_MUTABLE=1                 releases are created mutable
-// `api repos/<o>/<r>/releases` lists that repo's releases as "<tag> <date>",
-// the date from `releaseOf` (default: 2026-01-01, the fixture's epoch).
+// `api repos/<o>/<r>/releases` lists that repo's published releases as
+// "<tag> <date>", the date from `trainCut` (default: 2026-01-01, the fixture's
+// epoch). A release created with --draft is a draft until `release edit
+// --draft=false`: it takes uploads (kept as asset-<tag>-<name>) and is left
+// out of the listing; a published one refuses them.
+//   FAKE_GH_UPLOAD_FAIL=1             `gh release upload` fails
 // Fake npm: `npm view <pkg>@<v> version` answers once primitives' release of
 // v exists and FAKE_NPM_POLLS polls have gone by; FAKE_NPM_NEVER=1 never answers.
 // Every invocation is appended to FAKE_LOG.
@@ -41,6 +45,7 @@ import { after, test } from 'node:test';
 import { Context, type Options } from './context.ts';
 import { COPIER_VERSION } from './copier.ts';
 import { realIo } from './io.ts';
+import { parseManifest } from './manifest.ts';
 import { type PropagateOptions, propagate } from './propagate.ts';
 import { type ShipOptions, type ShipResult, ship } from './ship.ts';
 import type { Summary } from './take.ts';
@@ -103,15 +108,22 @@ dir="$FAKE_FORGE/$repo"; mkdir -p "$dir"
 arg() { local k="$1"; shift; while [ $# -gt 0 ]; do [ "$1" = "$k" ] && { echo "$2"; return; }; shift; done; }
 case "$1 $2" in
   "auth status") [ -z "\${FAKE_GH_LOGGED_OUT:-}" ] || { echo "not logged in" >&2; exit 1; }; echo "logged in" ;;
-  "release view") [ -f "$dir/release-$3" ] || { echo "release not found" >&2; exit 1; }; cat "$dir/release-$3" ;;
+  "release view") [ -f "$dir/release-$3" ] || { echo "release not found" >&2; exit 1; }
+    case "$*" in *"--json isDraft"*) [ -f "$dir/draft-$3" ] && echo true || echo false ;; *) cat "$dir/release-$3" ;; esac ;;
+  "release upload")
+    [ -f "$dir/draft-$3" ] || { echo "release $3 is published: its assets are locked" >&2; exit 1; }
+    [ -z "\${FAKE_GH_UPLOAD_FAIL:-}" ] || { echo "upload failed on purpose" >&2; exit 1; }
+    cp "$4" "$dir/asset-$3-$(basename "$4")" ;;
+  "release edit") [ "$4" = "--draft=false" ] || { echo "fake gh: unexpected $*" >&2; exit 1; }; rm -f "$dir/draft-$3" ;;
   "release create")
     git ls-remote --exit-code --tags origin "refs/tags/$3" >/dev/null || { echo "tag $3 not on origin" >&2; exit 1; }
     [ -z "\${FAKE_GH_MUTABLE:-}" ] && echo true > "$dir/release-$3" || echo false > "$dir/release-$3"
+    case "$*" in *" --draft"*) touch "$dir/draft-$3" ;; esac
     [ "$repo" != primitives ] || echo "$3" >> "$FAKE_FORGE/npm-published" ;;
   "api "*)
     case "$2" in
       *"/releases/tags/"*) cat "$dir/release-\${2##*/}" ;;
-      *"/releases") for f in "$dir"/release-*; do [ -f "$f" ] || continue; v="\${f##*/release-}"; echo "$v $(cat "$dir/date-$v" 2>/dev/null || echo 2026-01-01T00:00:00Z)"; done ;;
+      *"/releases") for f in "$dir"/release-*; do [ -f "$f" ] || continue; v="\${f##*/release-}"; [ ! -f "$dir/draft-$v" ] || continue; echo "$v $(cat "$dir/date-$v" 2>/dev/null || echo 2026-01-01T00:00:00Z)"; done ;;
       *) ls "$dir"/release-* 2>/dev/null | tail -1 | xargs -r cat ;;
     esac ;;
   "pr list") f="$dir/pr-$(arg --head "$@" | tr / -)"; [ ! -f "$f" ] || cat "$f" ;;
@@ -360,6 +372,9 @@ async function runPropagate(options: Options, args: Partial<PropagateOptions> = 
   }
 }
 
+/** A train as a repo sees it: a published release of the compendium, cut on `date`. */
+const trainCut = (v: string, date?: string) => releaseOf('compendium', v, date);
+
 /** A release of a train repo on the fake forge, as ship would have created it. */
 const releaseOf = (r: string, v: string, date?: string) => {
   mkdirSync(join(FORGE(), r), { recursive: true });
@@ -429,6 +444,11 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
   );
   assert.ok(has(out, `[dry-run] > ${join(up('compendium'), 'contracts/alpha.md')}`), 'preview lists the write');
   assert.ok(has(out, `[dry-run] $ (cd ${up('primitives')} && gh release create 0.2.0 --verify-tag`), 'release step');
+  assert.ok(
+    has(out, /\[dry-run\] \$ \(cd \S+\/compendium && gh release upload 0\.2\.0 \S+\/train\.json --clobber\)/),
+    'the manifest upload is a step of the preview',
+  );
+  assert.ok(has(out, `[dry-run] $ (cd ${up('compendium')} && gh release edit 0.2.0 --draft=false)`));
   consumersUntouched();
   assert.match(read(join(WS, 'acme/web/.github/workflows/ci.yml')), /@0\.1\.0/, 'consumer workflow refs untouched');
   assert.throws(() => onTrain('acme-web', '0.2.0', 'template-owned.txt'), 'no train branch pushed');
@@ -557,6 +577,26 @@ test('happy path: primitives first, the npm wait, the rest, and no pull request 
   );
   assert.match(read(join(up('preset-repo-turbo'), 'template/.github/workflows/ci.yml.jinja')), /changes\.yml@0\.2\.0/);
 
+  // The compendium's release: a draft, the manifest uploaded, then published; the others in one step.
+  const drafted = at('gh[compendium] release create 0.2.0 --verify-tag --generate-notes --title 0.2.0 --draft');
+  const uploaded = at('gh[compendium] release upload 0.2.0');
+  const published = at('gh[compendium] release edit 0.2.0 --draft=false');
+  assert.ok(presetRelease < drafted && drafted < uploaded && uploaded < published, `order in:\n${log.join('\n')}`);
+  assert.ok(!existsSync(join(FORGE(), 'compendium', 'draft-0.2.0')), 'published');
+  assert.ok(
+    log.filter((l) => has(l, 'release create')).every((l) => has(l, 'gh[compendium]') === has(l, '--draft')),
+    'only the compendium goes through a draft',
+  );
+  const manifest = parseManifest(read(join(FORGE(), 'compendium', 'asset-0.2.0-train.json')));
+  assert.equal(manifest.train, '0.2.0');
+  assert.equal(manifest.date, '2026-01-02');
+  assert.deepEqual(
+    manifest.modules.map((m) => `${m.code} ${m.maturity} ${m.changed ?? '-'}`),
+    ['PLX-Alpha standard 0.2.0', 'PLX-Beta standard 0.1.0', 'PLX-Delta standard 0.2.0', 'PLX-Gamma candidate -'],
+    'the catalogue as the train stamped it',
+  );
+  assert.ok(has(out, 'compendium: train.json: train 0.2.0, 4 modules'));
+
   // And there it ends: ship looks for no consumer and opens no pull request.
   consumersUntouched();
   assert.equal(copierRuns().length, 0, 'copier never ran');
@@ -648,14 +688,23 @@ test('propagate: every repo under the directory takes the train in a worktree of
 
 test('propagate: a directory of tenant repos and no upstream checkout; a repo that needs no train rests until asked', async () => {
   fixture('propagate-tenant');
-  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-25');
-  releaseOf('preset-repo-operations', '0.2.0', '2026-01-20');
+  trainCut('0.2.0', '2026-02-25');
   const acme = join(WS, 'acme');
+  // The platform repo's answers set three days; the web repo's say nothing.
+  put(
+    join(acme, 'platform/.copier-answers.yml'),
+    '_commit: 0.1.0\n_src_path: gh:plexus-ms/preset-repo-operations\nupdate_max_age: 3\n',
+  );
+  commit(join(acme, 'platform'), 'three days at most');
+  git(join(acme, 'platform'), 'push', '--quiet', 'origin', 'main');
   const { result, error, out } = await runPropagate({ yes: true }, { dir: acme });
   assert.equal(error, undefined, out);
   assert.ok(!fakeLog().some((l) => has(l, `${WS}/plexus-ms`)), 'nothing read from an upstream checkout');
   assert.ok(has(out, '• web: rests — 1 newer train, the oldest (0.2.0) cut 4 days ago; the backstop is 30 days'), out);
-  assert.ok(has(out, '• platform: takes 0.2.0 — 0.2.0, the oldest train not taken, was cut 40 days ago'), out);
+  assert.ok(
+    has(out, '• platform: takes 0.2.0 — 0.2.0, the oldest train not taken, was cut 4 days ago (backstop: 3 days'),
+    out,
+  );
   assert.deepEqual(result?.resting, [
     { path: 'web', reason: '1 newer train, the oldest (0.2.0) cut 4 days ago; the backstop is 30 days' },
   ]);
@@ -693,8 +742,7 @@ test('propagate: the state of the checkouts does not matter', async () => {
   put(join(WS, 'acme/web/notes.txt'), 'scratch\n'); // untracked
   put(join(WS, 'acme/platform/template-owned.txt'), 'generated\nedited\n'); // tracked modification
   git(join(WS, 'acme/web'), 'checkout', '--quiet', '-b', 'feature/x'); // wrong branch
-  releaseOf('preset-repo-turbo', '0.2.0');
-  releaseOf('preset-repo-operations', '0.2.0');
+  trainCut('0.2.0');
   const { result, error, out } = await runPropagate({ yes: true });
   assert.equal(error, undefined, out);
   assert.match(onTrain('acme-web', '0.2.0', 'template-owned.txt'), /updated from/, 'origin updated from develop');
@@ -765,6 +813,36 @@ test('a registry that never answers stops the run resumably; the re-run skips wh
   assert.ok(allTagged('0.2.0') && allReleased('0.2.0'));
 });
 
+test("a run that stops at the manifest leaves the compendium's release a draft, which no repo sees; the re-run publishes it", async () => {
+  fixture('draft');
+  process.env.FAKE_GH_UPLOAD_FAIL = '1';
+  const first = await run({ yes: true });
+  delete process.env.FAKE_GH_UPLOAD_FAIL;
+  assert.match(first.error ?? '', /upload failed on purpose/);
+  assert.match(first.error ?? '', /re-run with --train 0\.2\.0/);
+  assert.ok(remoteTagged('compendium', '0.2.0') && existsSync(join(FORGE(), 'compendium', 'draft-0.2.0')));
+  assert.ok(released('preset-repo-operations', '0.2.0'), 'every other repo is released');
+  // To a repo the train is not cut yet.
+  const early = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
+  assert.match(early.error ?? '', /no release of plexus-ms\/compendium found/);
+
+  const second = await run({ yes: true }, { train: '0.2.0' });
+  assert.equal(second.error, undefined, second.out);
+  assert.ok(has(second.out, '• compendium: release 0.2.0 is still a draft — finishing it'));
+  assert.equal(fakeLog().filter((l) => has(l, 'gh[compendium] release create')).length, 1, 'never re-created');
+  assert.ok(!existsSync(join(FORGE(), 'compendium', 'draft-0.2.0')), 'published');
+  assert.equal(parseManifest(read(join(FORGE(), 'compendium', 'asset-0.2.0-train.json'))).train, '0.2.0');
+  const late = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
+  assert.equal(late.error, undefined, late.out);
+  assert.ok(has(late.out, '• platform: takes 0.2.0'), late.out);
+
+  // A third run finds it published and uploads nothing.
+  const third = await run({ yes: true }, { train: '0.2.0' });
+  assert.equal(third.error, undefined, third.out);
+  assert.ok(has(third.out, '• compendium: release 0.2.0 exists'));
+  assert.equal(fakeLog().filter((l) => has(l, 'gh[compendium] release upload')).length, 2, 'one failed, one done');
+});
+
 test('disagreeing latest tags refuse a derived version and accept an explicit one', async () => {
   fixture('skew');
   git(up('primitives'), 'tag', '-a', '0.2.0', '-m', 'half train');
@@ -816,8 +894,7 @@ test('a push failure mid-release names the recovery, and the re-run finishes the
 
 test('propagate: a failing site does not stop the others, and the summary says so', async () => {
   fixture('failsite');
-  releaseOf('preset-repo-turbo', '0.2.0');
-  releaseOf('preset-repo-operations', '0.2.0');
+  trainCut('0.2.0');
   process.env.FAKE_COPIER_FAIL = 'acme/platform';
   const { result, error, out } = await runPropagate({ yes: true });
   delete process.env.FAKE_COPIER_FAIL;
@@ -836,8 +913,7 @@ test('propagate: a failing site does not stop the others, and the summary says s
 
 test('propagate: a conflict is committed with its markers and the pull request says so', async () => {
   fixture('conflict');
-  releaseOf('preset-repo-turbo', '0.2.0');
-  releaseOf('preset-repo-operations', '0.2.0');
+  trainCut('0.2.0');
   process.env.FAKE_COPIER_CONFLICT = 'acme/web/apps';
   const { result, out } = await runPropagate({ yes: true });
   delete process.env.FAKE_COPIER_CONFLICT;
@@ -851,8 +927,7 @@ test('propagate: a conflict is committed with its markers and the pull request s
 
 test('propagate: a conflict at the repo root does not stop its apps', async () => {
   fixture('rootconflict');
-  releaseOf('preset-repo-turbo', '0.2.0');
-  releaseOf('preset-repo-operations', '0.2.0');
+  trainCut('0.2.0');
   process.env.FAKE_COPIER_CONFLICT = 'acme/web';
   const { result, out } = await runPropagate({ yes: true });
   delete process.env.FAKE_COPIER_CONFLICT;
@@ -892,8 +967,8 @@ test('the confirmation aborts cleanly without a terminal', async () => {
 // ── the tenant-side pull: update ─────────────────────────────────────────────
 test('update: a repo takes the newest train itself, in a worktree, and leaves its checkout alone', async () => {
   fixture('update');
-  releaseOf('preset-repo-turbo', '0.1.0');
-  releaseOf('preset-repo-turbo', '0.2.0');
+  trainCut('0.1.0');
+  trainCut('0.2.0');
   const web = join(WS, 'acme/web');
   git(web, 'checkout', '--quiet', '-b', 'feature/x');
   put(join(web, 'notes.txt'), 'scratch\n');
@@ -950,8 +1025,8 @@ test('update: a repo already at the train does nothing, and one without a releas
   fixture('update-current');
   const plat = join(WS, 'acme/platform');
   const none = await runUpdate({ yes: true }, { repo: plat });
-  assert.match(none.error ?? '', /no release of plexus-ms\/preset-repo-operations found/);
-  releaseOf('preset-repo-operations', '0.1.0');
+  assert.match(none.error ?? '', /no release of plexus-ms\/compendium found/);
+  trainCut('0.1.0');
   const { result, error, out } = await runUpdate({ yes: true }, { repo: plat });
   assert.equal(error, undefined, out);
   assert.ok(has(out, '• platform: already at 0.1.0'));
@@ -968,7 +1043,7 @@ test('update: a repo already at the train does nothing, and one without a releas
 
 test('update: the dry run previews in the worktree and pushes nothing', async () => {
   fixture('update-dry');
-  releaseOf('preset-repo-turbo', '0.2.0');
+  trainCut('0.2.0');
   const web = join(WS, 'acme/web');
   const { result, error, out } = await runUpdate({ dryRun: true, yes: true }, { repo: web });
   assert.equal(error, undefined, out);
@@ -985,8 +1060,7 @@ test('update: the dry run previews in the worktree and pushes nothing', async ()
 
 test("update: after propagate opened the train's pull request, the repo's own run finds it", async () => {
   fixture('update-after-propagate');
-  releaseOf('preset-repo-operations', '0.2.0');
-  releaseOf('preset-repo-turbo', '0.2.0');
+  trainCut('0.2.0');
   const propagated = await runPropagate({ yes: true });
   assert.equal(propagated.error, undefined, propagated.out);
   const before = copierRuns().length;
@@ -1000,7 +1074,7 @@ test("update: after propagate opened the train's pull request, the repo's own ru
 
 test('update: a conflict is committed with its markers, the pull request opened, the exit nonzero', async () => {
   fixture('update-conflict');
-  releaseOf('preset-repo-turbo', '0.2.0');
+  trainCut('0.2.0');
   process.env.FAKE_COPIER_CONFLICT = 'apps/site';
   const { result, error, out } = await runUpdate({ yes: true }, { repo: join(WS, 'acme/web') });
   delete process.env.FAKE_COPIER_CONFLICT;
@@ -1013,9 +1087,9 @@ test('update: a conflict is committed with its markers, the pull request opened,
 
 test('update: a repo rests while no trigger holds, and takes the newest train once the backstop age is exceeded', async () => {
   fixture('update-rest');
-  releaseOf('preset-repo-turbo', '0.1.0', '2026-01-01');
-  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-10');
-  releaseOf('preset-repo-turbo', '0.3.0', '2026-02-25');
+  trainCut('0.1.0', '2026-01-01');
+  trainCut('0.2.0', '2026-02-10');
+  trainCut('0.3.0', '2026-02-25');
   const web = join(WS, 'acme/web');
   const rest = await runUpdate({ yes: true }, { repo: web });
   assert.equal(rest.error, undefined, rest.out);
@@ -1046,8 +1120,7 @@ test('update: a repo rests while no trigger holds, and takes the newest train on
 
 test('update: asking takes the train whatever its age, by --now or by naming it', async () => {
   fixture('update-asked');
-  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-28');
-  releaseOf('preset-repo-operations', '0.2.0', '2026-02-28');
+  trainCut('0.2.0', '2026-02-28');
   const web = join(WS, 'acme/web');
   const rest = await runUpdate({ yes: true }, { repo: web });
   assert.ok(has(rest.out, '• web: rests — 1 newer train, the oldest (0.2.0) cut 1 day ago'), rest.out);
@@ -1057,16 +1130,16 @@ test('update: asking takes the train whatever its age, by --now or by naming it'
   assert.match(pull('acme-web', '0.2.0', '.body'), /Opened by `plx update`: asked for \(--now\)\./);
 
   const plat = join(WS, 'acme/platform');
+  const listings = fakeLog().filter((l) => has(l, '/releases')).length;
   const named = await runUpdate({ yes: true }, { repo: plat, train: '0.2.0' });
   assert.equal(named.error, undefined, named.out);
-  assert.ok(!fakeLog().some((l) => has(l, 'gh[preset-repo-operations] api')), 'a named train asks the forge for none');
+  assert.equal(fakeLog().filter((l) => has(l, '/releases')).length, listings, 'a named train asks the forge for none');
   assert.match(pull('acme-platform', '0.2.0', '.body'), /asked for \(--train 0\.2\.0\)/);
 });
 
 test('update: the backstop age is the answer of the repo preset, zero takes every train, and the option overrides both', async () => {
   fixture('update-age');
-  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-28');
-  releaseOf('preset-repo-operations', '0.2.0', '2026-02-20');
+  trainCut('0.2.0', '2026-02-20');
   // The platform repo's answers set a week: nine days is past it.
   const plat = join(WS, 'acme/platform');
   put(
@@ -1084,7 +1157,7 @@ test('update: the backstop age is the answer of the repo preset, zero takes ever
   const rest = await runUpdate({ yes: true }, { repo: web });
   assert.ok(has(rest.out, 'the backstop is 30 days'), rest.out);
   const long = await runUpdate({ yes: true }, { repo: web, maxAge: 90, today: '2026-04-15' });
-  assert.ok(has(long.out, 'cut 46 days ago; the backstop is 90 days'), long.out);
+  assert.ok(has(long.out, 'cut 54 days ago; the backstop is 90 days'), long.out);
   // The repo is judged by what origin has on the branch the train lands on.
   put(
     join(web, '.copier-answers.yml'),

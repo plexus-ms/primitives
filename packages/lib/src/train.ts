@@ -9,13 +9,20 @@ import { compareTrains } from './doctor.ts';
 /** The repo whose tag publishes the train-versioned packages; it is released first. */
 export const PRIMITIVES = 'primitives';
 
+/**
+ * The repo whose releases are the trains as a repo outside the workspace sees
+ * them: it is released last, so a train shows there once it is cut everywhere,
+ * and its release carries the train manifest (manifest.ts).
+ */
+export const COMPENDIUM = 'compendium';
+
 /** The repos stamped with the train tag, in release order. */
 export const TRAIN_REPOS = [
   PRIMITIVES,
   'preset-repo-turbo',
   'preset-app-nextjs',
   'preset-repo-operations',
-  'compendium',
+  COMPENDIUM,
 ] as const;
 
 /**

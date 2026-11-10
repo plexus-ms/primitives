@@ -8,9 +8,10 @@
 // repo's answers set (`update_max_age`, in days; 30 when they do not say, zero
 // for every train). Otherwise the repo rests: one line saying why, exit 0.
 //
-// The trains are the preset's GitHub releases (every train tag is locked by
-// one, § 1.6 PLX), asked of the forge as an operator would
-// (`gh api repos/plexus-ms/<preset>/releases`): the newest is the train to
+// The trains are the compendium's GitHub releases (every train tag is locked
+// by one, § 1.6 PLX, and the compendium is released last, so a train shows
+// there once it is cut everywhere), asked of the forge as an operator would
+// (`gh api repos/plexus-ms/compendium/releases`): the newest is the train to
 // take, and their dates are what the backstop is measured against. The work happens in a
 // worktree of origin's branch, never in the checkout: a developer's branch and
 // edits stay as they are, and in CI the worktree shares the checkout's
@@ -37,7 +38,7 @@ import { run } from './effects.ts';
 import { maxAgeOf, needOf, type Release } from './need.ts';
 import { overview } from './overview.ts';
 import { detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './take.ts';
-import { isTrainVersion, preflightForge, UsageError } from './train.ts';
+import { COMPENDIUM, isTrainVersion, preflightForge, UsageError } from './train.ts';
 
 export interface UpdateOptions {
   /** The repo to update: a checkout whose root is a site of a repo preset. */
@@ -74,8 +75,8 @@ export async function update(ctx: Context, options: UpdateOptions): Promise<Summ
   if (!root) throw new Error(`${name}: its root is not a site of a repo preset`);
 
   await preflightForge(ctx);
-  const releases = options.train === undefined ? await releasesOf(ctx, root.preset) : [];
-  const train = options.train ?? newestOf(releases, root.preset);
+  const releases = options.train === undefined ? await trains(ctx) : [];
+  const train = options.train ?? newestOf(releases);
   const summary = emptySummary(train, ctx.dryRun);
 
   // The repo is judged by what its origin has on the branch the train lands
@@ -149,11 +150,13 @@ export async function update(ctx: Context, options: UpdateOptions): Promise<Summ
   return summary;
 }
 
-/** The preset's releases are the trains (§ 1.6 PLX: every train tag has one), with the dates they were cut. */
-async function releasesOf(ctx: Context, preset: string): Promise<Release[]> {
-  const source = presetSource(preset).replace(/^gh:/, '');
+/** Where the trains are read from: the compendium's releases. */
+const TRAINS = `plexus-ms/${COMPENDIUM}`;
+
+/** The trains (§ 1.6 PLX: every train tag has a release), with the dates they were cut; a draft is no train yet. */
+async function trains(ctx: Context): Promise<Release[]> {
   const jq = '.[] | select(.draft | not) | "\\(.tag_name) \\(.published_at)"';
-  const lines = await ctx.read('gh', ['api', `repos/${source}/releases`, '--paginate', '--jq', jq]).catch(() => '');
+  const lines = await ctx.read('gh', ['api', `repos/${TRAINS}/releases`, '--paginate', '--jq', jq]).catch(() => '');
   return lines
     .split('\n')
     .map((l) => l.trim().split(/\s+/))
@@ -161,12 +164,9 @@ async function releasesOf(ctx: Context, preset: string): Promise<Release[]> {
     .map(([train, published]) => ({ train, published }));
 }
 
-/** The newest train among a preset's releases. */
-function newestOf(releases: Release[], preset: string): string {
+/** The newest train among the releases. */
+function newestOf(releases: Release[]): string {
   const newest = releases.map((r) => r.train).reduce((a, b) => (a && compareTrains(a, b) >= 0 ? a : b), '');
-  if (!newest)
-    throw new Error(
-      `no release of ${presetSource(preset).replace(/^gh:/, '')} found — pass the train explicitly (--train <version>)`,
-    );
+  if (!newest) throw new Error(`no release of ${TRAINS} found — pass the train explicitly (--train <version>)`);
   return newest;
 }
