@@ -91,12 +91,15 @@ export {
 export {
   DEFAULT_MAX_AGE,
   MAX_AGE_ANSWER,
+  type Marked,
   maxAgeOf,
   type Need,
   type NeedInput,
   needOf,
   parseMaxAge,
   type Release,
+  type Stale,
+  staleModules,
   type Trigger,
 } from './need.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';

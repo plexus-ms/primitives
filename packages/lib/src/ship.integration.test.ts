@@ -106,6 +106,8 @@ case "$2" in repos/[!{]*/[!{]*/*) r="\${2#repos/*/}"; repo="\${r%%/*}" ;; esac
 echo "gh[$repo] $*" >> "$FAKE_LOG"
 dir="$FAKE_FORGE/$repo"; mkdir -p "$dir"
 arg() { local k="$1"; shift; while [ $# -gt 0 ]; do [ "$1" = "$k" ] && { echo "$2"; return; }; shift; done; }
+# \`-R <owner>/<repo>\` names the repo whatever the directory.
+named="$(arg -R "$@")"; [ -z "$named" ] || { repo="\${named##*/}"; dir="$FAKE_FORGE/$repo"; mkdir -p "$dir"; }
 case "$1 $2" in
   "auth status") [ -z "\${FAKE_GH_LOGGED_OUT:-}" ] || { echo "not logged in" >&2; exit 1; }; echo "logged in" ;;
   "release view") [ -f "$dir/release-$3" ] || { echo "release not found" >&2; exit 1; }
@@ -114,6 +116,8 @@ case "$1 $2" in
     [ -f "$dir/draft-$3" ] || { echo "release $3 is published: its assets are locked" >&2; exit 1; }
     [ -z "\${FAKE_GH_UPLOAD_FAIL:-}" ] || { echo "upload failed on purpose" >&2; exit 1; }
     cp "$4" "$dir/asset-$3-$(basename "$4")" ;;
+  "release download")
+    f="$dir/asset-$3-$(arg -p "$@")"; [ -f "$f" ] || { echo "no assets match the file pattern" >&2; exit 1; }; cat "$f" ;;
   "release edit") [ "$4" = "--draft=false" ] || { echo "fake gh: unexpected $*" >&2; exit 1; }; rm -f "$dir/draft-$3" ;;
   "release create")
     git ls-remote --exit-code --tags origin "refs/tags/$3" >/dev/null || { echo "tag $3 not on origin" >&2; exit 1; }
@@ -374,6 +378,25 @@ async function runPropagate(options: Options, args: Partial<PropagateOptions> = 
 
 /** A train as a repo sees it: a published release of the compendium, cut on `date`. */
 const trainCut = (v: string, date?: string) => releaseOf('compendium', v, date);
+
+/** The manifest on a train's release, as ship would have uploaded it: the given modules changed in that train. */
+const manifestOf = (v: string, changed: string[], unchanged: string[] = []) => {
+  const module = (code: string, at?: string) => ({
+    code,
+    kind: 'approach',
+    maturity: at ? 'standard' : 'candidate',
+    binds: 'repo',
+    ...(at ? { changed: at } : {}),
+    depends: [],
+    consumes: [],
+  });
+  const modules = [...changed.map((c) => module(c, v)), ...unchanged.map((c) => module(c))];
+  mkdirSync(join(FORGE(), 'compendium'), { recursive: true });
+  writeFileSync(
+    join(FORGE(), 'compendium', `asset-${v}-train.json`),
+    JSON.stringify({ schema: 1, train: v, date: '2026-01-02', modules }),
+  );
+};
 
 /** A release of a train repo on the fake forge, as ship would have created it. */
 const releaseOf = (r: string, v: string, date?: string) => {
@@ -1173,4 +1196,68 @@ test('update: the backstop age is the answer of the repo preset, zero takes ever
   const eager = await runUpdate({ yes: true }, { repo: web, maxAge: 0 });
   assert.equal(eager.error, undefined, eager.out);
   assert.ok(has(eager.out, '• web: takes 0.2.0 — a backstop age of zero takes every train (1 newer train)'), eager.out);
+});
+
+test('update: a module a site declares that changed in a newer train takes it at once; other repos rest', async () => {
+  fixture('update-module');
+  trainCut('0.2.0', '2026-02-28');
+  // PLX-Platform changed in 0.2.0; PLX-Updates is in the catalogue without a change.
+  manifestOf('0.2.0', ['PLX-Platform'], ['PLX-Updates']);
+  const plat = join(WS, 'acme/platform');
+  const web = join(WS, 'acme/web');
+  // A marker outside any site is kept by hand: a pull would not cure it, so it is not a reason for one.
+  put(join(web, 'docs/PLEXUS.md'), '---\nplexus: 0.0.1\nmodules: [PLX-Platform]\n---\n');
+  commit(web, 'a marker of its own');
+  git(web, 'push', '--quiet', 'origin', 'develop');
+
+  const rest = await runUpdate({ yes: true }, { repo: web });
+  assert.equal(rest.error, undefined, rest.out);
+  assert.ok(has(rest.out, '• web: rests — 1 newer train, the oldest (0.2.0) cut 1 day ago'), rest.out);
+  assert.ok(!has(rest.out, 'modules are not checked'), 'the manifest was read');
+
+  const { result, error, out } = await runUpdate({ yes: true }, { repo: plat });
+  assert.equal(error, undefined, out);
+  assert.ok(
+    has(out, '• platform: takes 0.2.0 — PLX-Platform changed in 0.2.0, declared at 0.1.0 in platform/PLEXUS.md'),
+    out,
+  );
+  assert.match(
+    pull('acme-platform', '0.2.0', '.body'),
+    /Opened by `plx update`: PLX-Platform changed in 0\.2\.0, declared at 0\.1\.0 in platform\/PLEXUS\.md\./,
+  );
+  assert.deepEqual(result?.pulls, ['https://forge/acme-platform/pull/1']);
+});
+
+test('update: a train without a manifest says so and leaves the repo to its backstop', async () => {
+  fixture('update-no-manifest');
+  trainCut('0.2.0', '2026-02-28');
+  const { result, error, out } = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
+  assert.equal(error, undefined, out);
+  assert.ok(has(out, 'platform: train 0.2.0 carries no train.json that can be read; its modules are not checked'), out);
+  assert.ok(has(out, '• platform: rests — 1 newer train'), out);
+  assert.deepEqual(result?.pulls, []);
+
+  // One that is not a manifest is an error, not a silent rest.
+  writeFileSync(join(FORGE(), 'compendium', 'asset-0.2.0-train.json'), '{"schema": 2}');
+  const bad = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
+  assert.match(bad.error ?? '', /the train manifest has schema 2; this plx reads 1/);
+});
+
+test('ship to update, end to end: the manifest ship uploads is what makes a repo take the train', async () => {
+  fixture('e2e-module');
+  // The platform repo declares a module of the fixture's compendium that this train changes.
+  const plat = join(WS, 'acme/platform');
+  put(join(plat, 'PLEXUS.md'), '---\nplexus: 0.1.0\nmodules: [PLX-Repo, PLX-Alpha]\n---\n');
+  commit(plat, 'declares alpha');
+  git(plat, 'push', '--quiet', 'origin', 'main');
+  const shipped = await run({ yes: true });
+  assert.equal(shipped.error, undefined, shipped.out);
+  // The day after the train: far inside the backstop.
+  const { error, out } = await runPropagate({ yes: true }, { today: '2026-01-02' });
+  assert.equal(error, undefined, out);
+  assert.ok(
+    has(out, '• acme/platform: takes 0.2.0 — PLX-Alpha changed in 0.2.0, declared at 0.1.0 in acme/platform/PLEXUS.md'),
+    out,
+  );
+  assert.ok(has(out, '• acme/web: rests — 1 newer train, the oldest (0.2.0) cut 1 day ago'), out);
 });

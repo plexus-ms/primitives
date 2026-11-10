@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_MAX_AGE, maxAgeOf, needOf, parseMaxAge, type Release } from './need.ts';
+import type { Catalog, Module } from './catalog.ts';
+import { DEFAULT_MAX_AGE, maxAgeOf, needOf, parseMaxAge, type Release, staleModules } from './need.ts';
 
 const releases: Release[] = [
   { train: '0.3.0', published: '2026-02-25T10:00:00Z' },
@@ -43,6 +44,55 @@ test('asking takes the train whatever its age, and zero days takes every train',
     why: 'a backstop age of zero takes every train (2 newer trains)',
   });
   assert.equal(needOf({ ...base, maxAge: 0, recorded: ['0.3.0'] }).take, false, 'nothing newer, nothing to take');
+});
+
+const module = (code: string, changed?: string): [string, Module] => [
+  code,
+  {
+    code,
+    kind: 'approach',
+    maturity: changed ? 'standard' : 'candidate',
+    binds: 'repo',
+    changed,
+    depends: [],
+    consumes: [],
+  },
+];
+const catalog: Catalog = new Map([module('PLX-Repo', '0.2.0'), module('PLX-JS', '0.3.0'), module('PLX-CLI')]);
+
+test('a declared module is stale when its changed is newer than the marker that declares it', () => {
+  const markers = [
+    { where: 'web/PLEXUS.md', plexus: '0.2.0', modules: ['PLX-Repo', 'PLX-JS', 'PLX-CLI', 'PLX-Gone'] },
+    { where: 'web/apps/site/PLEXUS.md', plexus: '0.1.0', modules: ['PLX-Repo'] },
+    { where: 'web/apps/new/PLEXUS.md', plexus: '0.3.0', modules: ['PLX-Repo', 'PLX-JS'] },
+    { where: 'web/apps/odd/PLEXUS.md', plexus: 'next', modules: ['PLX-JS'] },
+  ];
+  assert.deepEqual(staleModules(markers, catalog), [
+    { code: 'PLX-JS', changed: '0.3.0', where: 'web/PLEXUS.md', declared: '0.2.0' },
+    { code: 'PLX-Repo', changed: '0.2.0', where: 'web/apps/site/PLEXUS.md', declared: '0.1.0' },
+  ]);
+  assert.deepEqual(staleModules(markers, new Map()), [], 'no catalogue, nothing stale');
+});
+
+test('a stale module takes the train whatever its age; asking comes first and names itself', () => {
+  const stale = staleModules(
+    [
+      { where: 'web/PLEXUS.md', plexus: '0.2.0', modules: ['PLX-JS'] },
+      { where: 'web/apps/site/PLEXUS.md', plexus: '0.1.0', modules: ['PLX-Repo', 'PLX-JS'] },
+    ],
+    catalog,
+  );
+  assert.deepEqual(needOf({ ...base, stale }), {
+    take: true,
+    trigger: 'module',
+    why: 'PLX-JS changed in 0.3.0, declared at 0.2.0 in web/PLEXUS.md, and 2 more',
+  });
+  assert.equal(
+    needOf({ ...base, stale: stale.slice(0, 1) }).why,
+    'PLX-JS changed in 0.3.0, declared at 0.2.0 in web/PLEXUS.md',
+  );
+  assert.equal(needOf({ ...base, stale, asked: '--now' }).why, 'asked for (--now)');
+  assert.equal(needOf({ ...base, stale: [] }).take, false);
 });
 
 test('a site that records no train is brought onto one', () => {

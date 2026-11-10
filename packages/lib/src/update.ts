@@ -3,10 +3,16 @@
 // the only thing that opens a train's pull request.
 //
 // It takes a train when the repo needs one, not whenever one was cut
-// (need.ts): when it is asked (`--now`, or a train named), or when the oldest
-// train the repo has not taken is older than the backstop age, which the
-// repo's answers set (`update_max_age`, in days; 30 when they do not say, zero
-// for every train). Otherwise the repo rests: one line saying why, exit 0.
+// (need.ts): when it is asked (`--now`, or a train named), when a module one
+// of its markers declares has changed since that marker (read from the
+// manifest on the train's release, manifest.ts), or when the oldest train the
+// repo has not taken is older than the backstop age, which the repo's answers
+// set (`update_max_age`, in days; 30 when they do not say, zero for every
+// train). Otherwise the repo rests: one line saying why, exit 0.
+//
+// The markers that count are those of the repo's sites, root and apps: the
+// ones a pull brings up to the train. A marker anywhere else is kept by hand,
+// a pull would not cure it, and `doctor` is what reports it.
 //
 // The trains are the compendium's GitHub releases (every train tag is locked
 // by one, § 1.6 PLX, and the compendium is released last, so a train shows
@@ -30,12 +36,14 @@
 //   plx -n update --now             # preview in a worktree, push nothing
 //   plx -y update --train 0.102.0   # unattended, an explicit train
 import { basename, join, relative } from 'node:path';
-import { findConsumers, PRESETS, presetSource } from './consumers.ts';
+import { type Consumer, findConsumers, PRESETS, presetSource } from './consumers.ts';
 import type { Context } from './context.ts';
 import { ANSWERS_FILE, parseAnswers } from './copier.ts';
 import { compareTrains } from './doctor.ts';
 import { run } from './effects.ts';
-import { maxAgeOf, needOf, type Release } from './need.ts';
+import { catalogOf, MANIFEST_FILE, parseManifest } from './manifest.ts';
+import { MARKER_FILE, parseMarker } from './marker.ts';
+import { type Marked, maxAgeOf, needOf, type Release, type Stale, staleModules } from './need.ts';
 import { overview } from './overview.ts';
 import { detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './take.ts';
 import { COMPENDIUM, isTrainVersion, preflightForge, UsageError } from './train.ts';
@@ -114,10 +122,12 @@ export async function update(ctx: Context, options: UpdateOptions): Promise<Summ
     return summary;
   }
 
+  const asked = options.train !== undefined ? `--train ${train}` : options.now ? '--now' : undefined;
   const need = needOf({
     recorded,
     releases,
-    asked: options.train !== undefined ? `--train ${train}` : options.now ? '--now' : undefined,
+    asked,
+    stale: asked ? [] : await staleIn(ctx, consumer, repo, train),
     maxAge: options.maxAge ?? maxAgeOf(answers[consumer.sites.indexOf(root)]?.answers ?? {}),
     now: options.today === undefined ? new Date() : new Date(options.today),
   });
@@ -148,6 +158,40 @@ export async function update(ctx: Context, options: UpdateOptions): Promise<Summ
     if (scratch) await ctx.stage(run('rm', ['-rf', scratch]));
   }
   return summary;
+}
+
+/**
+ * The declared modules of the repo's sites that changed since their markers,
+ * by the manifest of the train. A train without a manifest (one cut before
+ * there were any, or a forge that cannot be asked) is said and checked for
+ * nothing: the backstop still holds.
+ */
+async function staleIn(ctx: Context, consumer: Consumer, repo: string, train: string): Promise<Stale[]> {
+  const text = await ctx
+    .read('gh', ['release', 'download', train, '-R', TRAINS, '-p', MANIFEST_FILE, '-O', '-'])
+    .catch(() => undefined);
+  if (text === undefined) {
+    ctx.say(
+      `  ${consumer.rel}: train ${train} carries no ${MANIFEST_FILE} that can be read; its modules are not checked`,
+    );
+    return [];
+  }
+  const catalog = catalogOf(parseManifest(text));
+  const markers: Marked[] = [];
+  for (const site of consumer.sites) {
+    const file = join(relative(consumer.path, site.path), MARKER_FILE);
+    const marker =
+      (await ctx.read('git', ['show', `origin/${consumer.branch}:${file}`], { cwd: repo }).catch(() => undefined)) ??
+      (await ctx.readFile(join(site.path, MARKER_FILE)).catch(() => undefined));
+    if (marker === undefined) continue;
+    try {
+      const { plexus, modules } = parseMarker(marker);
+      markers.push({ where: join(site.rel, MARKER_FILE), plexus, modules });
+    } catch {
+      // An unreadable marker is doctor's finding, not a reason to take a train.
+    }
+  }
+  return staleModules(markers, catalog);
 }
 
 /** Where the trains are read from: the compendium's releases. */

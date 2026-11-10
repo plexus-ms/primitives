@@ -2,11 +2,12 @@ name: _update
 
 # Mounts the update verb (§ 3 PLX-Updates): the repo takes the train itself,
 # when it needs one and not whenever one is cut. `plx update` asks the forge
-# for the trains (the compendium's releases) and decides: it takes the newest train when it is
-# asked (`now`, or a `train` named) or when the oldest train the repo has not
-# taken is older than the backstop age (the repo's answer `update_max_age`, 30
-# days unless it says otherwise); otherwise the repo rests, and the run says
-# why in one line and ends green. Taking a train is copier update at every
+# for the trains (the compendium's releases) and decides: it takes the newest
+# train when it is asked (`now`, or a `train` named), when a module the repo
+# declares has changed since its marker (the manifest on the train's release),
+# or when the oldest train the repo has not taken is older than the backstop
+# age (the repo's answer `update_max_age`, 30 days unless it says otherwise);
+# otherwise the repo rests, and the run says why in one line and ends green. Taking a train is copier update at every
 # site in a worktree of the branch the train lands on, the marker, the
 # lockfile, the workflow refs, and the pull request on `plexus/<version>`. A
 # branch already on origin is never moved, so a scheduled run cannot overwrite
