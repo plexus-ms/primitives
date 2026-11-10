@@ -1,6 +1,6 @@
 {
   "name": "@plexus-ms/cli-ci",
-  "version": "0.115.0",
+  "version": "0.116.0",
   "description": "plx-ci, the CI verbs of Plexus: throwaway runners on a cloud, a registry on object storage, reproducible image builds, and their teardown",
   "license": "GPL-3.0-or-later",
   "type": "module",
