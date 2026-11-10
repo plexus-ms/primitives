@@ -43,8 +43,11 @@ pbs_clients: []
 pbs_admins: "{{ iam_admins | default([]) | map(attribute='name') | list }}"
 
 # Disable root@pam for the web UI and API once there are admins, as on Proxmox
-# VE. The local CLI keeps working, except for the few calls that log in to the
-# API as root@pam (proxmox-backup-debug api, task list).
+# VE, as the role's last task. The local CLI keeps working, except for the
+# calls that log in to the API as root@pam (datastore create, sync-job run,
+# proxmox-backup-debug api, task list). On a host where an earlier run already
+# disabled it, a run that creates a datastore needs it enabled on the host first
+# and `-e pbs_disable_root_pam=false`, so the run leaves it enabled.
 pbs_disable_root_pam: true
 
 # Off-site copy: a second datastore whose chunks live in an S3 bucket, filled

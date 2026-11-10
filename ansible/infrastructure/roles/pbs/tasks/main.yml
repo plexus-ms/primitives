@@ -245,18 +245,6 @@
   changed_when: true
   loop: "{{ pbs_admins }}"
 
-# After the admins exist, so there is always a web UI login left. Jobs keep
-# running; break-glass is `proxmox-backup-manager user update root@pam --enable true`
-# on the console.
-- name: Disable root@pam
-  ansible.builtin.command:
-    cmd: proxmox-backup-manager user update root@pam --enable false
-  when:
-    - pbs_disable_root_pam
-    - pbs_admins | length > 0
-    - (pbs_users.stdout | from_json | selectattr('userid', 'equalto', 'root@pam') | map(attribute='enable') | first | default(true))
-  changed_when: true
-
 # ── off-site copy ───────────────────────────────────────────────────────────
 - name: Off-site copy in an S3 bucket
   when: pbs_offsite_bucket | length > 0
@@ -568,3 +556,18 @@
         name: pbs-snapshot-age.timer
         enabled: true
         state: started
+
+# ── root@pam ────────────────────────────────────────────────────────────────
+# Last, because some of the CLI calls above (datastore create, among them the
+# off-site datastore's) log in to the local API as root@pam and fail with
+# "permission check failed" once it is disabled. After the admins exist, so
+# there is always a web UI login left. Jobs keep running; break-glass is
+# `proxmox-backup-manager user update root@pam --enable true` on the console.
+- name: Disable root@pam
+  ansible.builtin.command:
+    cmd: proxmox-backup-manager user update root@pam --enable false
+  when:
+    - pbs_disable_root_pam | bool
+    - pbs_admins | length > 0
+    - (pbs_users.stdout | from_json | selectattr('userid', 'equalto', 'root@pam') | map(attribute='enable') | first | default(true))
+  changed_when: true
