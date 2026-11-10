@@ -12,7 +12,12 @@
 //     pin, workflow refs, plx pins, the config pin and catalog entry, the map's version and
 //     timestamp, `changed` on every standard module whose requirements moved),
 //     commit, tag, push, release, repo by repo
-//   → propagate to every consumer as pull requests (propagate.ts).
+//
+// and there it ends. Cutting a train and a repo taking it are separate events
+// (§ 3 PLX-Updates): ship looks for no consumer and opens no pull request; a
+// repo takes the train itself, when it needs it (update.ts). The dry run is
+// the one place consumers still appear: it previews the unreleased presets
+// against the workspace's consumers (preview.ts), a maintainer's test.
 //
 // The wait is what lets phase two pin the train number: the compendium's
 // commit hook installs plx at that pin, and the presets hand it to every
@@ -24,9 +29,9 @@
 //
 //   plx ship ~/dev                    # next train = minor+1 over the latest
 //   plx ship ~/dev --train 1.0.0      # explicit train version
-//   plx -n ship ~/dev                 # preview: list the bookkeeping, tags and
-//                                     # the propagation in scratch clones
-//   plx -y ship ~/dev                 # unattended: no prompt, copier takes defaults
+//   plx -n ship ~/dev                 # preview: list the bookkeeping and tags, and
+//                                     # try the presets on the consumers in scratch clones
+//   plx -y ship ~/dev                 # unattended: no prompt
 import { join } from 'node:path';
 import {
   bumpCatalogPin,
@@ -50,9 +55,10 @@ import {
 import type { Context } from './context.ts';
 import { type Plan, run, write } from './effects.ts';
 import { frontmatterField } from './frontmatter.ts';
-import { propagate, type Summary } from './propagate.ts';
+import { previewConsumers } from './preview.ts';
 import { extractRequirements, MAP_PAGE, modulePages } from './requirements.ts';
 import { preflightSelf } from './self.ts';
+import { emptySummary, type Summary } from './take.ts';
 import {
   PRIMITIVES,
   phasesOf,
@@ -77,12 +83,10 @@ export interface PublishWait {
 const DEFAULT_WAIT: PublishWait = { interval: 15_000, timeout: 20 * 60_000 };
 
 export interface ShipOptions {
-  /** The workspace: the upstream umbrella and the consumers sit under it. */
+  /** The workspace: the upstream umbrella sits under it, and for the dry run's preview the consumers. */
   workspace: string;
-  /** The train version; default: minor+1 over the latest, or the current one when only propagating. */
+  /** The train version; default: minor+1 over the latest. */
   train?: string;
-  /** Skip the release; only propagate to the consumers. */
-  propagateOnly?: boolean;
   /** The date stamped on the map, `YYYY-MM-DD`; default: today. */
   today?: string;
   /** The running plx's version: when given, refuse to run behind its newest release (self.ts). */
@@ -91,25 +95,23 @@ export interface ShipOptions {
   wait?: Partial<PublishWait>;
 }
 
+/** The train cut, and under a dry run what the preview found in the consumers; a real run's lists are empty. */
 export interface ShipResult extends Summary {
-  /** The version released, or already current when only propagating. */
   released: boolean;
 }
 
 export async function ship(ctx: Context, options: ShipOptions): Promise<ShipResult> {
   const upstream = join(options.workspace, UPSTREAM);
-  const propagateOnly = options.propagateOnly ?? false;
   if (options.plx) await preflightSelf(ctx, options.plx);
   const train = await readTrain(ctx, upstream);
   await preflightForge(ctx);
-  if (!propagateOnly) {
-    await preflightRelease(ctx, train);
-    await preflightImmutable(ctx, train);
-  }
-  const next = resolveVersion(train, options.train, propagateOnly);
-  if (!propagateOnly) await release(ctx, train, next, options.today ?? todayOf(), { ...DEFAULT_WAIT, ...options.wait });
-  const summary = await propagate(ctx, options.workspace, next);
-  return { ...summary, released: !propagateOnly };
+  await preflightRelease(ctx, train);
+  await preflightImmutable(ctx, train);
+  const next = resolveVersion(train, options.train, false);
+  await release(ctx, train, next, options.today ?? todayOf(), { ...DEFAULT_WAIT, ...options.wait });
+  if (ctx.dryRun) return { ...(await previewConsumers(ctx, options.workspace, next)), released: true };
+  ctx.say(`• train ${next} is cut; every repo takes it itself, when it needs it (plx update)`);
+  return { ...emptySummary(next, false), released: true };
 }
 
 /**

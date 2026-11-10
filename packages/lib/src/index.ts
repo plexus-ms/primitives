@@ -42,6 +42,7 @@ export {
   type Consumer,
   expectedBranch,
   findConsumers,
+  PRESETS,
   presetOf,
   presetSource,
   RENAMED_PRESETS,
@@ -90,7 +91,8 @@ export {
   type Trigger,
 } from './need.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';
-export { isClean, propagate, type Summary } from './propagate.ts';
+export { previewConsumers } from './preview.ts';
+export { type PropagateOptions, propagate } from './propagate.ts';
 export {
   type CompendiumCheck,
   checkCompendium,
@@ -103,6 +105,7 @@ export {
 } from './requirements.ts';
 export { preflightSelf, SELF_PACKAGE } from './self.ts';
 export { type PublishWait, type ShipOptions, type ShipResult, ship } from './ship.ts';
+export { isClean, type Summary } from './take.ts';
 export {
   isTrainVersion,
   latestTag,
@@ -121,4 +124,4 @@ export {
   UPSTREAM,
   UsageError,
 } from './train.ts';
-export { PRESETS, type UpdateOptions, update } from './update.ts';
+export { type UpdateOptions, update } from './update.ts';

@@ -1,11 +1,11 @@
-// plx ship [dir]: release the train and propagate it (§ 1.5 PLX).
+// plx ship [dir]: cut the train (§ 1.5 PLX), and nothing after it.
 //
 // lib's `ship` does the work: preflight, bookkeeping, tags, releases, the
-// wait for npm, then `propagate`, which opens one pull request per consumer.
-// This file maps the arguments and renders the summary; the exit code is 0
-// only when nothing needs a human but the pull requests. -n previews the
-// release as its steps and the propagation in scratch clones; -y is required
-// off a terminal.
+// wait for npm. It opens no pull request: a repo takes the train itself, when
+// it needs it (`plx update`), and `plx propagate --now` asks many at once.
+// This file maps the arguments and renders the outcome. -n previews the
+// release as its steps and tries the unreleased presets on the workspace's
+// consumers in scratch clones, with a summary; -y is required off a terminal.
 //
 //   plx ship ~/dev                 # next train = minor+1 over the latest
 //   plx -n ship ~/dev              # preview, change nothing in the workspace
@@ -19,14 +19,18 @@ export function register(program: Command): void {
   program
     .command('ship')
     .description(
-      'release the train: tag and release every train repo identically, then open a pull request per consumer',
+      'cut the train: tag and release every train repo identically; repos take it themselves (update, propagate)',
     )
-    .argument('[dir]', 'the workspace: plexus-ms/ and the consumers sit under it', '.')
+    .argument('[dir]', 'the workspace: plexus-ms/ sits under it, and the consumers the dry run previews', '.')
     .option('--train <version>', 'the train version, plain semver (default: minor+1 over the latest train)')
     .action(async (dir: string, opts: { train?: string }, command: Command) => {
       const ctx = contextOf(command);
       const result = await ship(ctx, { workspace: resolve(dir), train: opts.train, plx: version });
-      ctx.result(result, (r) => renderSummary(r, `plx -y ship --train ${r.train} ${dir}`));
+      ctx.result(result, (r) =>
+        r.preview
+          ? renderSummary(r, `plx -y ship --train ${r.train} ${dir}`, 'ship')
+          : `✓ train ${r.train} cut — repos take it themselves; to take it now where it matters: plx propagate --now ${dir}`,
+      );
       if (!isClean(result)) process.exitCode = 1;
     });
 }
@@ -49,6 +53,6 @@ export function renderSummary(s: Summary, realCommand: string, verb = 'propagate
   } else if (clean) {
     lines.push(s.pulls.length > 0 ? '✓ done — review and merge the pull requests' : '✓ done — no pull request');
   }
-  if (!clean) lines.push(`✗ needs attention — see above; fix the consumer, then re-run ${verb}`);
+  if (!clean) lines.push(`✗ needs attention — see above; fix the repo, then re-run ${verb}`);
   return lines.join('\n');
 }

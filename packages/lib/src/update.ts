@@ -28,23 +28,22 @@
 //   plx update --now                # the newest train, whatever its triggers say
 //   plx -n update --now             # preview in a worktree, push nothing
 //   plx -y update --train 0.102.0   # unattended, an explicit train
-import { basename, join } from 'node:path';
-import { findConsumers, presetSource } from './consumers.ts';
+import { basename, join, relative } from 'node:path';
+import { findConsumers, PRESETS, presetSource } from './consumers.ts';
 import type { Context } from './context.ts';
 import { ANSWERS_FILE, parseAnswers } from './copier.ts';
 import { compareTrains } from './doctor.ts';
 import { run } from './effects.ts';
 import { maxAgeOf, needOf, type Release } from './need.ts';
 import { overview } from './overview.ts';
-import { detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './propagate.ts';
-import { isTrainVersion, preflightForge, TRAIN_REPOS, UsageError } from './train.ts';
-
-/** The train repos that are templates: what a repo can be generated from. */
-export const PRESETS: readonly string[] = TRAIN_REPOS.filter((r) => r.startsWith('preset-'));
+import { detail, emptySummary, openPullUrl, type Summary, takeTrain, trainBranch } from './take.ts';
+import { isTrainVersion, preflightForge, UsageError } from './train.ts';
 
 export interface UpdateOptions {
   /** The repo to update: a checkout whose root is a site of a repo preset. */
   repo: string;
+  /** What the repo is called in the narration and the summary; default: its directory's name. */
+  name?: string;
   /** The train to take, which is asking for it; default: the preset's newest release. */
   train?: string;
   /** Take the newest train whatever the triggers say: somebody asks. */
@@ -57,7 +56,7 @@ export interface UpdateOptions {
 
 export async function update(ctx: Context, options: UpdateOptions): Promise<Summary> {
   const { repo } = options;
-  const name = basename(repo);
+  const name = options.name ?? basename(repo);
   if (options.train !== undefined && !isTrainVersion(options.train))
     throw new UsageError(`'${options.train}' is not plain semver (X.Y.Z, no v)`);
 
@@ -79,8 +78,17 @@ export async function update(ctx: Context, options: UpdateOptions): Promise<Summ
   const train = options.train ?? newestOf(releases, root.preset);
   const summary = emptySummary(train, ctx.dryRun);
 
+  // The repo is judged by what its origin has on the branch the train lands
+  // on, not by the checkout, which may be behind it or on a branch of its own.
+  await ctx.read('git', ['fetch', '--quiet', 'origin', consumer.branch], { cwd: repo }).catch(() => '');
   const answers = await Promise.all(
-    consumer.sites.map(async (s) => parseAnswers(await ctx.readFile(join(s.path, ANSWERS_FILE)))),
+    consumer.sites.map(async (s) => {
+      const file = join(relative(consumer.path, s.path), ANSWERS_FILE);
+      const onOrigin = await ctx
+        .read('git', ['show', `origin/${consumer.branch}:${file}`], { cwd: repo })
+        .catch(() => undefined);
+      return parseAnswers(onOrigin ?? (await ctx.readFile(join(s.path, ANSWERS_FILE))));
+    }),
   );
   const recorded = answers.map((a) => a.commit);
   if (recorded.every((c) => c === train)) {

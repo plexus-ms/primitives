@@ -1,7 +1,7 @@
-// The consumers of the presets: every copier-managed site in a workspace
+// The consumers of the presets: every copier-managed site under a directory
 // (tenant repo roots and their apps/*) and the repo each belongs to. A
-// consumer is updated in a scratch clone of its origin, never in the workspace
-// checkout, on the branch the train lands on: a platform repo (declares
+// consumer is updated in a scratch checkout of its origin's branch, never in
+// its own checkout, on the branch the train lands on: a platform repo (declares
 // PLX-Platform) rides main, an app repo (declares PLX-Repo) rides develop
 // (§ 3 PLX-Delivery), and a package repo (its root answers say
 // `publishes_packages`) is trunk-based on main (§ 5 PLX-Delivery). A repo
@@ -10,6 +10,10 @@ import { relative } from 'node:path';
 import type { Context } from './context.ts';
 import type { Declaration } from './marker.ts';
 import type { Directory } from './model.ts';
+import { TRAIN_REPOS } from './train.ts';
+
+/** The train repos that are templates: what a repo can be generated from. */
+export const PRESETS: readonly string[] = TRAIN_REPOS.filter((r) => r.startsWith('preset-'));
 
 export interface Site {
   path: string;

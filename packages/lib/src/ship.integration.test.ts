@@ -3,9 +3,9 @@
 // tenant with a web repo (root + one app, on develop) and a platform repo (on
 // main), each with a bare origin of its own — plus fakes for `copier`, `mise`,
 // `gh` and `npm` on PATH, and a scratch "forge" the gh and npm fakes share.
-// Each scenario builds a fresh fixture, runs `ship` against it with the real
-// Io, and asserts on tags, releases, the consumers' origins, the summary and
-// the narration.
+// Each scenario builds a fresh fixture, runs `ship`, `propagate` or `update`
+// against it with the real Io, and asserts on tags, releases, the consumers'
+// origins, the summary and the narration.
 //
 // Fake copier: `copier update` writes "updated from <ref>" into
 // template-owned.txt, bumps _commit in the answers file, and touches
@@ -41,8 +41,9 @@ import { after, test } from 'node:test';
 import { Context, type Options } from './context.ts';
 import { COPIER_VERSION } from './copier.ts';
 import { realIo } from './io.ts';
-import type { Summary } from './propagate.ts';
+import { type PropagateOptions, propagate } from './propagate.ts';
 import { type ShipOptions, type ShipResult, ship } from './ship.ts';
+import type { Summary } from './take.ts';
 import { TRAIN_REPOS } from './train.ts';
 import { type UpdateOptions, update } from './update.ts';
 
@@ -343,6 +344,22 @@ async function runUpdate(options: Options, args: UpdateOptions): Promise<UpdateR
   }
 }
 
+/** `propagate` over the workspace (or `dir`), on the clock `runUpdate` uses. */
+async function runPropagate(options: Options, args: Partial<PropagateOptions> = {}): Promise<UpdateRun> {
+  const stderr = new PassThrough();
+  let out = '';
+  stderr.on('data', (c: Buffer) => {
+    out += c;
+  });
+  const io = { ...realIo(), stdout: new PassThrough(), stderr };
+  const ctx = new Context(options, io);
+  try {
+    return { result: await propagate(ctx, { dir: WS, today: '2026-03-01', ...args }), out };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error), out };
+  }
+}
+
 /** A release of a train repo on the fake forge, as ship would have created it. */
 const releaseOf = (r: string, v: string, date?: string) => {
   mkdirSync(join(FORGE(), r), { recursive: true });
@@ -462,7 +479,7 @@ test('dry run previews both phases and the propagation in scratch clones, and ch
   });
 });
 
-test('happy path: primitives first, the npm wait, the rest, then one pull request per consumer', async () => {
+test('happy path: primitives first, the npm wait, the rest, and no pull request in any consumer', async () => {
   fixture('happy');
   process.env.FAKE_NPM_POLLS = '4';
   const { result, error, out } = await run({ yes: true });
@@ -540,30 +557,56 @@ test('happy path: primitives first, the npm wait, the rest, then one pull reques
   );
   assert.match(read(join(up('preset-repo-turbo'), 'template/.github/workflows/ci.yml.jinja')), /changes\.yml@0\.2\.0/);
 
-  // Propagation: the workspace checkouts stay as they are; the origins get a train branch and a pull request.
+  // And there it ends: ship looks for no consumer and opens no pull request.
+  consumersUntouched();
+  assert.equal(copierRuns().length, 0, 'copier never ran');
+  assert.ok(!fakeLog().some((l) => has(l, 'gh[acme-')), 'the forge was never asked about a consumer');
+  assert.throws(() => onTrain('acme-web', '0.2.0', 'template-owned.txt'), 'no train branch on a consumer');
+  assert.throws(() => onTrain('acme-platform', '0.2.0', 'template-owned.txt'));
+  assert.ok(has(out, '• train 0.2.0 is cut; every repo takes it itself, when it needs it (plx update)'));
+  assert.deepEqual(result, {
+    train: '0.2.0',
+    preview: false,
+    clean: [],
+    conflicted: [],
+    failed: [],
+    skipped: [],
+    resting: [],
+    pulls: [],
+    released: true,
+  });
+});
+
+// ── the operator's loop over update: propagate ───────────────────────────────
+test('propagate: every repo under the directory takes the train in a worktree of its branch, one pull request each', async () => {
+  fixture('propagate');
+  const shipped = await run({ yes: true });
+  assert.equal(shipped.error, undefined, shipped.out);
+  const { result, error, out } = await runPropagate({ yes: true });
+  assert.equal(error, undefined, out);
   consumersUntouched();
   assert.deepEqual(
     copierRuns().map((l) => l.split(' ')[0]?.replace(/^.*\/acme\//, 'acme/')),
     ['acme/platform', 'acme/web', 'acme/web/apps/site'],
-    'copier ran in the clones, consumers in tree order, a repo root before its app',
+    'copier ran in the worktrees, repos in tree order, a repo root before its app',
   );
   assert.ok(
-    copierRuns().every((l) => !has(l, '--vcs-ref') && has(l, '--skip-tasks')),
-    'no ref override against the published source; tasks skipped',
+    copierRuns().every((l) => has(l, '--vcs-ref 0.2.0') && has(l, '--skip-tasks') && !l.startsWith(`${WS}/`)),
+    'the published train, tasks skipped, outside the checkouts',
   );
   assert.equal(copierRuns().filter((l) => has(l, '--defaults')).length, 3, 'unattended run lets copier take defaults');
   assert.equal(
     fakeLog().filter((l) => l.startsWith('mise exec copier@') && / ignored=\/\S+\/acme\/(web|platform)$/.test(l))
       .length,
     3,
-    "copier ran with the clone's mise config ignored",
+    "copier ran with the worktree's mise config ignored",
   );
   for (const [r, f] of [
     ['acme-web', 'template-owned.txt'],
     ['acme-web', 'apps/site/template-owned.txt'],
     ['acme-platform', 'template-owned.txt'],
   ] as const)
-    assert.match(onTrain(r, '0.2.0', f), /updated from/, `${r}:${f}`);
+    assert.match(onTrain(r, '0.2.0', f), /updated from 0\.2\.0/, `${r}:${f}`);
   assert.match(onTrain('acme-web', '0.2.0', 'PLEXUS.md'), /^plexus: next$/m, 'marker follows the answers file');
   assert.match(onTrain('acme-platform', '0.2.0', 'PLEXUS.md'), /^plexus: next$/m);
   const ci = onTrain('acme-web', '0.2.0', '.github/workflows/ci.yml');
@@ -587,34 +630,72 @@ test('happy path: primitives first, the npm wait, the rest, then one pull reques
   assert.equal(pull('acme-platform', '0.2.0', '.base'), 'main');
   assert.match(pull('acme-web', '0.2.0', '.body'), /Train 0\.2\.0 .*acme\/web, acme\/web\/apps\/site/);
   assert.match(pull('acme-web', '0.2.0', '.body'), /Merged clean/);
+  assert.match(pull('acme-web', '0.2.0', '.body'), /Opened by `plx update`: 0\.2\.0, the oldest train not taken/);
   assert.ok(has(out, 'acme/web: pull request opened: https://forge/acme-web/pull/1'));
-  assert.deepEqual(result?.clean, ['acme/platform', 'acme/web', 'acme/web/apps/site']);
-  assert.deepEqual(result?.pulls, ['https://forge/acme-platform/pull/1', 'https://forge/acme-web/pull/1']);
-  assert.equal(result?.preview, false);
+  for (const r of ['acme/web', 'acme/platform'])
+    assert.equal(git(join(WS, r), 'worktree', 'list').split('\n').length, 1, `${r}: worktree removed`);
+  assert.deepEqual(result, {
+    train: '0.2.0',
+    preview: false,
+    clean: ['acme/platform', 'acme/web', 'acme/web/apps/site'],
+    conflicted: [],
+    failed: [],
+    skipped: [],
+    resting: [],
+    pulls: ['https://forge/acme-platform/pull/1', 'https://forge/acme-web/pull/1'],
+  });
 });
 
-test('a re-run of the propagation moves the train branch and reuses its pull request', async () => {
+test('propagate: a directory of tenant repos and no upstream checkout; a repo that needs no train rests until asked', async () => {
+  fixture('propagate-tenant');
+  releaseOf('preset-repo-turbo', '0.2.0', '2026-02-25');
+  releaseOf('preset-repo-operations', '0.2.0', '2026-01-20');
+  const acme = join(WS, 'acme');
+  const { result, error, out } = await runPropagate({ yes: true }, { dir: acme });
+  assert.equal(error, undefined, out);
+  assert.ok(!fakeLog().some((l) => has(l, `${WS}/plexus-ms`)), 'nothing read from an upstream checkout');
+  assert.ok(has(out, '• web: rests — 1 newer train, the oldest (0.2.0) cut 4 days ago; the backstop is 30 days'), out);
+  assert.ok(has(out, '• platform: takes 0.2.0 — 0.2.0, the oldest train not taken, was cut 40 days ago'), out);
+  assert.deepEqual(result?.resting, [
+    { path: 'web', reason: '1 newer train, the oldest (0.2.0) cut 4 days ago; the backstop is 30 days' },
+  ]);
+  assert.deepEqual(result?.clean, ['platform']);
+  assert.deepEqual(result?.pulls, ['https://forge/acme-platform/pull/1']);
+  assert.throws(() => onTrain('acme-web', '0.2.0', 'template-owned.txt'), 'the resting repo has no train branch');
+
+  // Asked, the resting repo takes it; the other has its branch on origin and is left alone.
+  const now = await runPropagate({ yes: true }, { dir: acme, now: true });
+  assert.equal(now.error, undefined, now.out);
+  assert.ok(has(now.out, '• web: takes 0.2.0 — asked for (--now)'), now.out);
+  assert.ok(has(now.out, 'platform: plexus/0.2.0 is already on origin (https://forge/acme-platform/pull/1)'));
+  assert.deepEqual(now.result?.resting, []);
+  assert.deepEqual(now.result?.pulls, ['https://forge/acme-platform/pull/1', 'https://forge/acme-web/pull/1']);
+});
+
+test('propagate: a second run finds the train branches on origin and moves nothing', async () => {
   fixture('rerun');
-  const first = await run({ yes: true });
+  const shipped = await run({ yes: true });
+  assert.equal(shipped.error, undefined, shipped.out);
+  const first = await runPropagate({ yes: true });
   assert.equal(first.error, undefined, first.out);
-  const second = await run({ yes: true }, { propagateOnly: true });
+  const tip = git(remote('acme-web'), 'rev-parse', 'plexus/0.2.0');
+  const second = await runPropagate({ yes: true }, { now: true });
   assert.equal(second.error, undefined, second.out);
-  assert.equal(fakeLog().filter((l) => has(l, 'pr create')).length, 2, 'two consumers, two pull requests in all');
-  assert.ok(has(second.out, 'acme/web: pull request updated: https://forge/acme-web/pull/1'));
-  assert.equal(
-    git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'),
-    '1',
-    'branch replaced, not stacked',
-  );
+  assert.equal(fakeLog().filter((l) => has(l, 'pr create')).length, 2, 'two repos, two pull requests in all');
+  assert.ok(has(second.out, 'acme/web: plexus/0.2.0 is already on origin (https://forge/acme-web/pull/1)'));
+  assert.equal(git(remote('acme-web'), 'rev-parse', 'plexus/0.2.0'), tip, 'the branch is where it was');
+  assert.equal(copierRuns().length, 3, 'copier not run again');
   assert.deepEqual(second.result?.pulls, ['https://forge/acme-platform/pull/1', 'https://forge/acme-web/pull/1']);
 });
 
-test('the state of the workspace checkouts does not matter to the propagation', async () => {
+test('propagate: the state of the checkouts does not matter', async () => {
   fixture('checkouts');
   put(join(WS, 'acme/web/notes.txt'), 'scratch\n'); // untracked
   put(join(WS, 'acme/platform/template-owned.txt'), 'generated\nedited\n'); // tracked modification
   git(join(WS, 'acme/web'), 'checkout', '--quiet', '-b', 'feature/x'); // wrong branch
-  const { result, error, out } = await run({ yes: true });
+  releaseOf('preset-repo-turbo', '0.2.0');
+  releaseOf('preset-repo-operations', '0.2.0');
+  const { result, error, out } = await runPropagate({ yes: true });
   assert.equal(error, undefined, out);
   assert.match(onTrain('acme-web', '0.2.0', 'template-owned.txt'), /updated from/, 'origin updated from develop');
   assert.match(onTrain('acme-platform', '0.2.0', 'template-owned.txt'), /updated from/);
@@ -729,16 +810,18 @@ test('a push failure mid-release names the recovery, and the re-run finishes the
   assert.equal(third.error, undefined, third.out);
   assert.ok(allTagged('0.2.0') && allReleased('0.2.0'));
   assert.ok(has(third.out, '• preset-repo-turbo: already tagged 0.2.0'));
-  assert.match(onTrain('acme-platform', '0.2.0', 'template-owned.txt'), /updated from/, 're-run: consumers updated');
+  consumersUntouched();
+  assert.ok(!fakeLog().some((l) => has(l, 'pr create')), 'no pull request, before or after');
 });
 
-test('a failing site does not stop the others, and the summary says so', async () => {
+test('propagate: a failing site does not stop the others, and the summary says so', async () => {
   fixture('failsite');
+  releaseOf('preset-repo-turbo', '0.2.0');
+  releaseOf('preset-repo-operations', '0.2.0');
   process.env.FAKE_COPIER_FAIL = 'acme/platform';
-  const { result, error, out } = await run({ yes: true });
+  const { result, error, out } = await runPropagate({ yes: true });
   delete process.env.FAKE_COPIER_FAIL;
   assert.equal(error, undefined, out);
-  assert.ok(allTagged('0.2.0'), 'release completed');
   assert.match(onTrain('acme-web', '0.2.0', 'template-owned.txt'), /updated from/);
   assert.match(
     onTrain('acme-platform', '0.2.0', '.github/workflows/apps.yml'),
@@ -751,10 +834,12 @@ test('a failing site does not stop the others, and the summary says so', async (
   assert.deepEqual(result?.clean, ['acme/web', 'acme/web/apps/site']);
 });
 
-test('a conflict is committed with its markers and the pull request says so', async () => {
+test('propagate: a conflict is committed with its markers and the pull request says so', async () => {
   fixture('conflict');
+  releaseOf('preset-repo-turbo', '0.2.0');
+  releaseOf('preset-repo-operations', '0.2.0');
   process.env.FAKE_COPIER_CONFLICT = 'acme/web/apps';
-  const { result, out } = await run({ yes: true });
+  const { result, out } = await runPropagate({ yes: true });
   delete process.env.FAKE_COPIER_CONFLICT;
   assert.ok(has(out, '✗ CONFLICTS'));
   assert.deepEqual(result?.conflicted, ['acme/web/apps/site']);
@@ -764,10 +849,12 @@ test('a conflict is committed with its markers and the pull request says so', as
   assert.equal(result?.pulls.length, 2, 'the pull request is opened all the same');
 });
 
-test('a conflict at the repo root does not stop its apps', async () => {
+test('propagate: a conflict at the repo root does not stop its apps', async () => {
   fixture('rootconflict');
+  releaseOf('preset-repo-turbo', '0.2.0');
+  releaseOf('preset-repo-operations', '0.2.0');
   process.env.FAKE_COPIER_CONFLICT = 'acme/web';
-  const { result, out } = await run({ yes: true });
+  const { result, out } = await runPropagate({ yes: true });
   delete process.env.FAKE_COPIER_CONFLICT;
   assert.deepEqual(result?.conflicted, ['acme/web', 'acme/web/apps/site'], out);
   assert.deepEqual(result?.failed, []);
@@ -779,21 +866,19 @@ test('a conflict at the repo root does not stop its apps', async () => {
   assert.equal(git(remote('acme-web'), 'rev-list', '--count', 'develop..plexus/0.2.0'), '1', 'still one commit');
 });
 
-test('propagate-only validates the version and bumps to the current train', async () => {
+test('propagate: a named train is validated, and asks every repo for it without a release list', async () => {
   fixture('prop');
-  const bad = await run({ yes: true }, { propagateOnly: true, train: '1.2' });
+  const bad = await runPropagate({ yes: true }, { train: '1.2' });
   assert.match(bad.error ?? '', /'1\.2' is not plain semver/);
-  const { result, error, out } = await run({ yes: true }, { propagateOnly: true });
+  const { result, error, out } = await runPropagate({ yes: true }, { train: '0.2.0' });
   assert.equal(error, undefined, out);
-  assert.ok(noneTagged('0.2.0'));
-  assert.match(onTrain('acme-web', '0.1.0', 'template-owned.txt'), /updated from/);
-  assert.match(
-    onTrain('acme-web', '0.1.0', '.github/workflows/ci.yml'),
-    /changes\.yml@0\.1\.0/,
-    'refs stay at the current train',
-  );
-  assert.equal(result?.train, '0.1.0');
-  assert.equal(result?.released, false);
+  assert.ok(noneTagged('0.2.0'), 'propagate cuts nothing');
+  assert.ok(has(out, '• acme/web: takes 0.2.0 — asked for (--train 0.2.0)'), out);
+  assert.ok(!fakeLog().some((l) => has(l, '/releases')), 'the forge is not asked for the trains');
+  assert.match(onTrain('acme-web', '0.2.0', 'template-owned.txt'), /updated from 0\.2\.0/);
+  assert.match(onTrain('acme-web', '0.2.0', '.github/workflows/ci.yml'), /changes\.yml@0\.2\.0/);
+  assert.equal(result?.train, '0.2.0');
+  assert.equal(result?.pulls.length, 2);
 });
 
 test('the confirmation aborts cleanly without a terminal', async () => {
@@ -898,10 +983,12 @@ test('update: the dry run previews in the worktree and pushes nothing', async ()
   assert.equal(result?.preview, true);
 });
 
-test("update: after ship opened the train's pull request, the tenant's own run finds it", async () => {
-  fixture('update-after-ship');
-  const shipped = await run({ yes: true });
-  assert.equal(shipped.error, undefined, shipped.out);
+test("update: after propagate opened the train's pull request, the repo's own run finds it", async () => {
+  fixture('update-after-propagate');
+  releaseOf('preset-repo-operations', '0.2.0');
+  releaseOf('preset-repo-turbo', '0.2.0');
+  const propagated = await runPropagate({ yes: true });
+  assert.equal(propagated.error, undefined, propagated.out);
   const before = copierRuns().length;
   const { result, error, out } = await runUpdate({ yes: true }, { repo: join(WS, 'acme/platform') });
   assert.equal(error, undefined, out);
@@ -987,6 +1074,7 @@ test('update: the backstop age is the answer of the repo preset, zero takes ever
     '_commit: 0.1.0\n_src_path: gh:plexus-ms/preset-repo-operations\nupdate_max_age: 7\n',
   );
   commit(plat, 'a week at most');
+  git(plat, 'push', '--quiet', 'origin', 'main');
   const week = await runUpdate({ yes: true }, { repo: plat });
   assert.equal(week.error, undefined, week.out);
   assert.ok(has(week.out, 'was cut 9 days ago (backstop: 7 days; 1 newer train)'), week.out);
@@ -997,13 +1085,17 @@ test('update: the backstop age is the answer of the repo preset, zero takes ever
   assert.ok(has(rest.out, 'the backstop is 30 days'), rest.out);
   const long = await runUpdate({ yes: true }, { repo: web, maxAge: 90, today: '2026-04-15' });
   assert.ok(has(long.out, 'cut 46 days ago; the backstop is 90 days'), long.out);
+  // The repo is judged by what origin has on the branch the train lands on.
   put(
     join(web, '.copier-answers.yml'),
     '_commit: 0.1.0\n_src_path: gh:plexus-ms/preset-repo-turbo\nupdate_max_age: soon\n',
   );
+  const local = await runUpdate({ yes: true }, { repo: web });
+  assert.ok(has(local.out, 'the backstop is 30 days'), 'an edit in the checkout is not what origin says');
+  commit(web, 'soon');
+  git(web, 'push', '--quiet', 'origin', 'develop');
   const bad = await runUpdate({ yes: true }, { repo: web });
   assert.match(bad.error ?? '', /the answer update_max_age is 'soon', not a whole number of days/);
-  git(web, 'checkout', '--quiet', '.copier-answers.yml');
 
   const eager = await runUpdate({ yes: true }, { repo: web, maxAge: 0 });
   assert.equal(eager.error, undefined, eager.out);
