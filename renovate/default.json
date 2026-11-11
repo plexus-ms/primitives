@@ -48,31 +48,24 @@
       "automerge": true
     },
     {
-      "description": "Third-party patch, minor and digest updates from every manager (npm, compose images, Dockerfile base images, tools, actions) move together once a week and merge on green CI: one pull request to review when one goes red, one deploy per week per repo. The initiative's own packages and the train's pins keep their own rules.",
+      "description": "Third-party patch and digest updates from every manager (npm, compose images, Dockerfile base images, tools, actions) move together once a week and merge on green CI: one pull request to review when one goes red, one deploy per week per repo. The initiative's own packages and the train's pins keep their own rules. A dependency on a prerelease is left out: a prerelease promises nothing, so its updates keep Renovate's own grouping (one pull request per monorepo) and wait for a human; the tag list leaves image variants such as -alpine or -slim in the group.",
       "matchPackageNames": ["!@plexus-ms/**"],
-      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "matchUpdateTypes": ["patch", "digest"],
+      "matchCurrentVersion": "!/^v?\\d+\\.\\d+\\.\\d+-(alpha|beta|rc|canary|next|pre|dev)/",
       "groupName": "non-major dependencies",
       "groupSlug": "weekly",
       "schedule": ["before 4am on monday"],
       "automerge": true
     },
     {
-      "description": "A third-party minor below 1.0.0 may break, as semver allows: it stays out of the weekly group and waits for a human. The regex is matched against the locked version, so it holds for ranges such as ^0.3.1.",
+      "description": "Third-party minor updates join the same weekly pull request, except below 1.0.0, where a minor may break as semver allows, and on a prerelease; those wait for a human in pull requests of their own. The regex is matched against the locked version, so it holds for ranges such as ^0.3.1.",
       "matchPackageNames": ["!@plexus-ms/**"],
       "matchUpdateTypes": ["minor"],
-      "matchCurrentVersion": "/^v?0\\./",
-      "groupName": null,
-      "schedule": ["at any time"],
-      "automerge": false
-    },
-    {
-      "description": "A prerelease promises nothing, as semver allows: while an npm dependency is on one, its updates stay out of the weekly group and wait for a human. Renovate proposes a prerelease only to a dependency already on one.",
-      "matchDatasources": ["npm"],
-      "matchPackageNames": ["!@plexus-ms/**"],
-      "matchCurrentVersion": "/^v?\\d+\\.\\d+\\.\\d+-/",
-      "groupName": null,
-      "schedule": ["at any time"],
-      "automerge": false
+      "matchCurrentVersion": "!/^v?0\\.|^v?\\d+\\.\\d+\\.\\d+-(alpha|beta|rc|canary|next|pre|dev)/",
+      "groupName": "non-major dependencies",
+      "groupSlug": "weekly",
+      "schedule": ["before 4am on monday"],
+      "automerge": true
     },
     {
       "description": "The app is the unit of deployment (§ 3 PLX-Delivery): a major of one app's images moves as one PR, so one merge is one deploy and its services never run mismatched versions; patch and minor ride the weekly group. The group is named after the app directory, apps/<app>/.",
