@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "For a repo that publishes packages (§ 5 PLX-Delivery), extended after the shared preset: a published range is a promise to every consumer, so the bot keeps it as wide as it can.",
+    "An upstream release inside the range reaches only the lock file, which owes no changeset and forces no release; a range moves only when a release falls outside it, and a peer range widens instead of moving, so consumers on the older major keep working."
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies", "optionalDependencies"],
+      "rangeStrategy": "replace"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["peerDependencies"],
+      "rangeStrategy": "widen"
+    }
+  ]
+}

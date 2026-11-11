@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "For an operations repo (PLX-Tenancy), extended after the shared preset: a merge to main under apps/ deploys a third-party image to production, and the only check before it is the playbooks' syntax.",
+    "The weekly group therefore waits for a human, who reads the release notes before production runs the new versions; a security fix still merges on green CI."
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["!@plexus-ms/**"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": false
+    }
+  ]
+}

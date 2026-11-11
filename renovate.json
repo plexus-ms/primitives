@@ -11,5 +11,14 @@
         "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\nexport const \\w+ = '(?<currentValue>[^']+)'"
       ]
     }
+  ],
+  "packageRules": [
+    {
+      "description": "Outside the weekly group, waiting for a human: the copier plx runs changes how every consumer takes a train (PLX-CLI), and the actions run in tenant CI next to its secrets while a train's pull request shows only their ref, not their code.",
+      "matchManagers": ["custom.regex", "github-actions"],
+      "groupName": null,
+      "schedule": ["at any time"],
+      "automerge": false
+    }
   ]
 }
