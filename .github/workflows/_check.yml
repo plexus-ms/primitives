@@ -91,7 +91,7 @@ jobs:
             echo "TURBO_TOKEN=$token"
             echo "TURBO_TEAM=${GITHUB_REPOSITORY//\//-}"
           } >> "$GITHUB_ENV"
-      - uses: brunojppb/turbo-cache-server@7a089b8e7cf1579794644119a3561bbb1314c946 # 5.0.0
+      - uses: brunojppb/turbo-cache-server@e8c812bfe6578bf1cdfbbecaec6dd1c316eaa7b0 # 5.0.2
         if: ${{ inputs.turbo-cache }}
         env:
           PORT: ${{ steps.turbo-cache.outputs.port }}
