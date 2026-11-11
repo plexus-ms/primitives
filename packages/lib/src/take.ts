@@ -11,8 +11,8 @@
 //
 // `update` (update.ts) is the verb on top of it, and the only thing that
 // opens a train's pull request; `propagate` (propagate.ts) runs that verb over
-// many repos. The maintainers' preview of an unreleased train (preview.ts)
-// uses the same steps against the local preset checkouts, and opens nothing.
+// many repos. The maintainers' preview of an unreleased train (preview.ts of
+// @plexus-ms/dev) uses the same steps against the local preset checkouts, and opens nothing.
 import { join, relative } from 'node:path';
 import { bumpWorkflowRefs, hasConflictMarkers, hasUnmergedEntries, syncMarker, WORKFLOW_REF } from './bookkeeping.ts';
 import { type Consumer, presetSource, RENAMED_PRESETS, type Site } from './consumers.ts';
@@ -81,7 +81,7 @@ export interface Take {
   train: string;
   /**
    * Preview from the local preset checkouts under this upstream directory at
-   * main (preview.ts), instead of the published template.
+   * main (preview.ts of @plexus-ms/dev), instead of the published template.
    */
   previewFrom?: string;
   /** The template ref copier updates to; unset, copier takes the newest tag, which the train just cut. */

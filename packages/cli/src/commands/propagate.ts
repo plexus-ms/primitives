@@ -10,10 +10,9 @@
 //   plx -n propagate ~/dev --now          # preview in worktrees, push nothing
 //   plx -y propagate ~/dev --train 0.66.0 # unattended: copier takes defaults
 import { resolve } from 'node:path';
-import { isClean, parseMaxAge, propagate } from '@plexus-ms/lib';
+import { isClean, parseMaxAge, propagate, renderSummary } from '@plexus-ms/lib';
 import type { Command } from 'commander';
 import { contextOf } from '../program.ts';
-import { renderSummary } from './ship.ts';
 
 export function register(program: Command): void {
   program

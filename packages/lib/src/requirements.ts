@@ -13,7 +13,7 @@
 // such a bullet, or any keyword or blockquote in a module below standard
 // maturity is a defect. The trailing "## Maintaining" section is prose
 // throughout. Extraction is structural: no classification, no heuristics.
-// `ship` compares a module's extracted lines across trains to stamp `changed`,
+// `plx-dev ship` compares a module's extracted lines across trains to stamp `changed`,
 // so the extractor and the linter are one function and cannot disagree.
 //
 //   plx requirements <compendium>              # lint; exit 1 on any defect

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeLine, renderSummary } from './ship.ts';
+import { mergeLine, renderSummary } from './summary.ts';
 
 test('renderSummary lists every site and ends with the verdict', () => {
   const base = {
@@ -15,15 +15,15 @@ test('renderSummary lists every site and ends with the verdict', () => {
     mergeable: [] as string[],
   };
   assert.equal(
-    renderSummary(base, 'plx -y ship --train 0.2.0 .').split('\n').slice(1).join('\n'),
+    renderSummary(base, 'plx-dev -y ship --train 0.2.0 .').split('\n').slice(1).join('\n'),
     '  ✓ clean:      acme/web\n  → pull:       https://github.com/acme/web/pull/7\n✓ done — review and merge the pull requests',
   );
   assert.equal(
-    renderSummary({ ...base, preview: true }, 'plx -y ship --train 0.2.0 .')
+    renderSummary({ ...base, preview: true }, 'plx-dev -y ship --train 0.2.0 .')
       .split('\n')
       .slice(1)
       .join('\n'),
-    '  ✓ clean:      acme/web\n  → pull:       https://github.com/acme/web/pull/7\n  (preview only — nothing was changed)\n✓ dry run clean — run it for real: plx -y ship --train 0.2.0 .',
+    '  ✓ clean:      acme/web\n  → pull:       https://github.com/acme/web/pull/7\n  (preview only — nothing was changed)\n✓ dry run clean — run it for real: plx-dev -y ship --train 0.2.0 .',
   );
   const bad = renderSummary(
     {

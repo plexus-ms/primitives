@@ -11,10 +11,9 @@
 //   plx -n update --now             # preview in a worktree, push nothing
 //   plx -y update --train 0.102.0   # unattended (CI): copier takes defaults
 import { resolve } from 'node:path';
-import { isClean, parseMaxAge, update } from '@plexus-ms/lib';
+import { isClean, parseMaxAge, renderSummary, update } from '@plexus-ms/lib';
 import type { Command } from 'commander';
 import { contextOf } from '../program.ts';
-import { renderSummary } from './ship.ts';
 
 export function register(program: Command): void {
   program

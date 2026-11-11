@@ -1,39 +1,8 @@
-// plx ship [dir]: cut the train (§ 1.5 PLX), and nothing after it.
-//
-// lib's `ship` does the work: preflight, bookkeeping, tags, releases, the
-// wait for npm. It opens no pull request: a repo takes the train itself, when
-// it needs it (`plx update`), and `plx propagate --now` asks many at once.
-// This file maps the arguments and renders the outcome. -n previews the
-// release as its steps and tries the unreleased presets on the workspace's
-// consumers in scratch clones, with a summary; -y is required off a terminal.
-//
-//   plx ship ~/dev                 # next train = minor+1 over the latest
-//   plx -n ship ~/dev              # preview, change nothing in the workspace
-//   plx -y ship ~/dev --train 1.0.0
-import { resolve } from 'node:path';
-import { isClean, type Summary, ship } from '@plexus-ms/lib';
-import type { Command } from 'commander';
-import { contextOf, version } from '../program.ts';
-
-export function register(program: Command): void {
-  program
-    .command('ship')
-    .description(
-      'cut the train: tag and release every train repo identically; repos take it themselves (update, propagate)',
-    )
-    .argument('[dir]', 'the workspace: plexus-ms/ sits under it, and the consumers the dry run previews', '.')
-    .option('--train <version>', 'the train version, plain semver (default: minor+1 over the latest train)')
-    .action(async (dir: string, opts: { train?: string }, command: Command) => {
-      const ctx = contextOf(command);
-      const result = await ship(ctx, { workspace: resolve(dir), train: opts.train, plx: version });
-      ctx.result(result, (r) =>
-        r.preview
-          ? renderSummary(r, `plx -y ship --train ${r.train} ${dir}`, 'ship')
-          : `✓ train ${r.train} cut — repos take it themselves; to take it now where it matters: plx propagate --now ${dir}`,
-      );
-      if (!isClean(result)) process.exitCode = 1;
-    });
-}
+// The summary of a run that takes a train in one or more repos (update,
+// propagate) or previews one (the dry run of `plx-dev ship`), rendered for a
+// human: one line per site, the pull requests, the line that merges the clean
+// ones, then the verdict. Every tool that prints a Summary prints it this way.
+import { isClean, type Summary } from './take.ts';
 
 /**
  * One line to paste that merges the given pull requests, each with a merge

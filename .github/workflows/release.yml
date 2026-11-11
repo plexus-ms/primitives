@@ -1,6 +1,6 @@
 name: release
 
-# Publishes the train-versioned packages (§ 1.6 PLX) when `plx ship` creates
+# Publishes the train-versioned packages (§ 1.6 PLX) when `plx-dev ship` creates
 # the train's GitHub release: a release, not a tag push, so that what is
 # published always comes from a tag an immutable release has locked. The
 # packages take their version from the release's tag, which is what the

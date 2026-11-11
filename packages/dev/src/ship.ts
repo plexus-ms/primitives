@@ -1,9 +1,8 @@
 // ship: the release train (§ 1.5 PLX). Every train repo ships under ONE
 // version, tagged identically whether or not it changed, in two phases:
 //
-//   preflight (plx itself not behind its newest release, self.ts; every train
-//   repo on main, clean, not behind origin, the latest tags in agreement; gh
-//   logged in; no mutable release on any train repo)
+//   preflight (every train repo on main, clean, not behind origin, the latest
+//   tags in agreement; gh logged in; no mutable release on any train repo)
 //   → phase one: primitives' bookkeeping (galaxy versions, the train-versioned
 //     packages' manifests, its own workflow refs), commit, tag, push, GitHub
 //     release — which locks the tag and runs primitives' release workflow
@@ -29,12 +28,36 @@
 // skips the repos already tagged and the releases that exist. A release is
 // never deleted: a deleted immutable release burns its number for good.
 //
-//   plx ship ~/dev                    # next train = minor+1 over the latest
-//   plx ship ~/dev --train 1.0.0      # explicit train version
-//   plx -n ship ~/dev                 # preview: list the bookkeeping and tags, and
-//                                     # try the presets on the consumers in scratch clones
-//   plx -y ship ~/dev                 # unattended: no prompt
+// ship runs from the source of the primitives checkout it cuts (`mise ship`
+// there), never as a published package: the tool that releases the train is
+// never itself a release that could lag behind it.
+//
+//   plx-dev ship ~/dev                    # next train = minor+1 over the latest
+//   plx-dev ship ~/dev --train 1.0.0      # explicit train version
+//   plx-dev -n ship ~/dev                 # preview: list the bookkeeping and tags, and
+//                                         # try the presets on the consumers in scratch clones
+//   plx-dev -y ship ~/dev                 # unattended: no prompt
 import { join } from 'node:path';
+import {
+  buildManifest,
+  bumpWorkflowRefs,
+  COMPENDIUM,
+  type Context,
+  emptySummary,
+  extractRequirements,
+  frontmatterField,
+  MANIFEST_FILE,
+  MAP_PAGE,
+  modulePages,
+  type Plan,
+  preflightForge,
+  readCatalog,
+  renderManifest,
+  run,
+  type Summary,
+  WORKFLOW_REF,
+  write,
+} from '@plexus-ms/lib';
 import {
   bumpCatalogPin,
   bumpCollectionPin,
@@ -43,7 +66,6 @@ import {
   bumpManifestVersion,
   bumpPlxPin,
   bumpRunnerImagePin,
-  bumpWorkflowRefs,
   COLLECTIONS,
   CONFIG_PIN,
   galaxyFile,
@@ -52,22 +74,11 @@ import {
   stampChanged,
   stampStandard,
   today as todayOf,
-  WORKFLOW_REF,
 } from './bookkeeping.ts';
-import { readCatalog } from './catalog.ts';
-import type { Context } from './context.ts';
-import { type Plan, run, write } from './effects.ts';
-import { frontmatterField } from './frontmatter.ts';
-import { buildManifest, MANIFEST_FILE, renderManifest } from './manifest.ts';
 import { previewConsumers } from './preview.ts';
-import { extractRequirements, MAP_PAGE, modulePages } from './requirements.ts';
-import { preflightSelf } from './self.ts';
-import { emptySummary, type Summary } from './take.ts';
 import {
-  COMPENDIUM,
   PRIMITIVES,
   phasesOf,
-  preflightForge,
   preflightRelease,
   readTrain,
   resolveVersion,
@@ -94,8 +105,6 @@ export interface ShipOptions {
   train?: string;
   /** The date stamped on the map, `YYYY-MM-DD`; default: today. */
   today?: string;
-  /** The running plx's version: when given, refuse to run behind its newest release (self.ts). */
-  plx?: string;
   /** The publish wait's pacing; the defaults suit a real registry, tests shorten them. */
   wait?: Partial<PublishWait>;
 }
@@ -107,12 +116,11 @@ export interface ShipResult extends Summary {
 
 export async function ship(ctx: Context, options: ShipOptions): Promise<ShipResult> {
   const upstream = join(options.workspace, UPSTREAM);
-  if (options.plx) await preflightSelf(ctx, options.plx);
   const train = await readTrain(ctx, upstream);
   await preflightForge(ctx);
   await preflightRelease(ctx, train);
   await preflightImmutable(ctx, train);
-  const next = resolveVersion(train, options.train, false);
+  const next = resolveVersion(train, options.train);
   await release(ctx, train, next, options.today ?? todayOf(), { ...DEFAULT_WAIT, ...options.wait });
   if (ctx.dryRun) return { ...(await previewConsumers(ctx, options.workspace, next)), released: true };
   ctx.say(`• train ${next} is cut; every repo takes it itself, when it needs it (plx update)`);
@@ -161,7 +169,7 @@ async function release(ctx: Context, train: Train, next: string, today: string, 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `${message}\n✗ ship stopped during the release; re-run with --train ${next} to finish it (tagged repos and existing releases are skipped; if the registry already has ${next}, update plx first: it is the same code, built from the commit phase one tagged)`,
+      `${message}\n✗ ship stopped during the release; re-run with --train ${next} to finish it (tagged repos and existing releases are skipped)`,
     );
   }
 }

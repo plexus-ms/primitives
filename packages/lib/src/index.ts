@@ -1,30 +1,16 @@
 // @plexus-ms/lib: the core layer of plx, usable without the CLI.
 //
+// It holds what a tenant repo and an operator of many repos need, and nothing
+// that cuts a train: that is the upstream's, in the unpublished
+// `@plexus-ms/dev` (packages/dev), which builds on this package.
+//
 // A verb here is either a reader returning data, or a pure planner returning
 // a Plan (effects.ts) from what was read. The Context (context.ts) reads through
 // an injected Io (io.ts) and applies plans, narrating every step; the CLI
 // package is an adapter that maps argv onto this. The parsers of Plexus's own
 // file shapes (marker.ts, copier.ts) live here, once, for every verb.
 // Conventions: compendium/miscellaneous/cli-design.md.
-export {
-  bumpCatalogPin,
-  bumpCollectionPin,
-  bumpConfigPin,
-  bumpGalaxyVersion,
-  bumpManifestVersion,
-  bumpPlxPin,
-  bumpWorkflowRefs,
-  COLLECTION_SOURCE,
-  CONFIG_PIN,
-  hasConflictMarkers,
-  hasUnmergedEntries,
-  PLX_PIN,
-  stampChanged,
-  stampStandard,
-  syncMarker,
-  today,
-  WORKFLOW_REF,
-} from './bookkeeping.ts';
+export { bumpWorkflowRefs, hasConflictMarkers, hasUnmergedEntries, syncMarker, WORKFLOW_REF } from './bookkeeping.ts';
 export { CATALOG_DIRS, type Catalog, type Module, parseModule, readCatalog } from './catalog.ts';
 export {
   CHANGESET_DIR,
@@ -103,7 +89,6 @@ export {
   type Trigger,
 } from './need.ts';
 export { overview, PRUNED, type ScanOptions } from './overview.ts';
-export { previewConsumers } from './preview.ts';
 export { type PropagateOptions, propagate } from './propagate.ts';
 export {
   type CompendiumCheck,
@@ -115,25 +100,7 @@ export {
   type Scan,
   scanPage,
 } from './requirements.ts';
-export { preflightSelf, SELF_PACKAGE } from './self.ts';
-export { type PublishWait, type ShipOptions, type ShipResult, ship } from './ship.ts';
-export { isClean, type Summary } from './take.ts';
-export {
-  isTrainVersion,
-  latestTag,
-  nextMinor,
-  PHASES,
-  PRIMITIVES,
-  phasesOf,
-  preflightForge,
-  preflightRelease,
-  readTrain,
-  resolveVersion,
-  TRAIN_PACKAGES,
-  TRAIN_REPOS,
-  type Train,
-  type TrainRepo,
-  UPSTREAM,
-  UsageError,
-} from './train.ts';
+export { mergeLine, renderSummary } from './summary.ts';
+export { detail, emptySummary, isClean, type Summary, type Take, takeTrain } from './take.ts';
+export { COMPENDIUM, isTrainVersion, preflightForge, TRAIN_REPOS, UsageError } from './train.ts';
 export { type UpdateOptions, update } from './update.ts';

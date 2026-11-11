@@ -11,12 +11,20 @@
 // The scratch work goes through `Context.stage`: performed although the run is
 // a dry run, since nothing the operator owns changes.
 import { join } from 'node:path';
-import { findConsumers, presetSource } from './consumers.ts';
-import type { Context } from './context.ts';
-import { run } from './effects.ts';
-import { overview } from './overview.ts';
-import { detail, emptySummary, type Summary, type Take, takeTrain } from './take.ts';
-import { TRAIN_REPOS, UPSTREAM } from './train.ts';
+import {
+  type Context,
+  detail,
+  emptySummary,
+  findConsumers,
+  overview,
+  presetSource,
+  run,
+  type Summary,
+  type Take,
+  TRAIN_REPOS,
+  takeTrain,
+} from '@plexus-ms/lib';
+import { UPSTREAM } from './train.ts';
 
 export async function previewConsumers(ctx: Context, workspace: string, train: string): Promise<Summary> {
   const summary = emptySummary(train, ctx.dryRun);
@@ -35,7 +43,7 @@ export async function previewConsumers(ctx: Context, workspace: string, train: s
     if (!consumers.some((c) => c.sites.some((s) => s.preset === preset)))
       ctx.say(`• no consumers of ${presetSource(preset)} found under ${workspace}`);
 
-  const take: Take = { train, opener: '`plx ship`', previewFrom: upstream };
+  const take: Take = { train, opener: '`plx-dev ship`', previewFrom: upstream };
   const scratch = (await ctx.stage(run('mktemp', ['-d'])))?.trim() ?? '';
   try {
     for (const consumer of consumers) {

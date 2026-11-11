@@ -1,5 +1,5 @@
 // The train manifest: what a train is, as data, for a repo that has no
-// compendium checkout. `ship` builds it from the compendium once the train's
+// compendium checkout. `plx-dev ship` builds it from the compendium once the train's
 // `changed` stamps are written and attaches it to the compendium's release of
 // the train as `train.json`; tenant tooling reads it from there.
 //

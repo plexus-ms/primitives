@@ -1,8 +1,9 @@
 # primitives ships the methodology's primitives (§ 1.6 PLX): the four plexus.*
 # collections and the Terraform modules, the reusable workflows, the
-# train-versioned packages @plexus-ms/{cli,lib,config}, and the shared Renovate
-# preset. Two toolchains live here, owned in PLEXUS.md: the JS/TS one of PLX-JS
-# (node pinned here, everything else a devDependency) and the ops one
+# train-versioned packages @plexus-ms/{cli,cli-ci,lib,config}, and the shared
+# Renovate preset; and, never published, plx-dev, which cuts the train
+# (`mise ship`). Two toolchains live here, owned in PLEXUS.md: the JS/TS one of
+# PLX-JS (node pinned here, everything else a devDependency) and the ops one
 # (ansible and ansible-lint for the roles, actionlint for the workflows). The
 # contract verbs compose both; the ops side is checked mechanically, never on
 # the honor system, because the roles run as root on every tenant's hosts.
@@ -52,6 +53,16 @@ run = "turbo run build"
 [tasks.verify]
 depends = ["lint", "check", "test"]
 description = "Perform all steps that verify code quality"
+
+# The upstream's verb (§ 1.5 PLX)
+
+[tasks.ship]
+depends = ["build"]
+description = "Cut the train from this checkout's own build: plx-dev ship over the workspace this checkout sits in (plexus-ms/primitives under it)"
+# Never a published package: the tool that releases the train is the code at
+# main, built here, so it cannot lag behind the release it cuts. Flags follow
+# `--`: `mise ship -- -n` previews, `mise ship -- -y` runs unattended.
+run = "plx-dev ship {{config_root}}/../.."
 
 # Internal / hidden tasks
 

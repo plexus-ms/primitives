@@ -1,4 +1,6 @@
-// The offline harness for ship: a scratch workspace laid out like ~/dev — the
+// The offline harness for the train, both sides of it: `ship` cutting it here,
+// and @plexus-ms/lib's `update` and `propagate` taking it, end to end. It
+// lives in the package that depends on both. A scratch workspace laid out like ~/dev — the
 // five train repos with bare "origin" remotes (the compendium among them), a
 // tenant with a web repo (root + one app, on develop) and a platform repo (on
 // main), each with a bare origin of its own — plus fakes for `copier`, `mise`,
@@ -42,15 +44,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, test } from 'node:test';
-import { Context, type Options } from './context.ts';
-import { COPIER_VERSION } from './copier.ts';
-import { realIo } from './io.ts';
-import { parseManifest } from './manifest.ts';
-import { type PropagateOptions, propagate } from './propagate.ts';
+import {
+  COPIER_VERSION,
+  Context,
+  type Options,
+  type PropagateOptions,
+  parseManifest,
+  propagate,
+  realIo,
+  type Summary,
+  TRAIN_REPOS,
+  type UpdateOptions,
+  update,
+} from '@plexus-ms/lib';
 import { type ShipOptions, type ShipResult, ship } from './ship.ts';
-import type { Summary } from './take.ts';
-import { TRAIN_REPOS } from './train.ts';
-import { type UpdateOptions, update } from './update.ts';
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), 'plx-ship-')));
 after(() => rmSync(TMP, { recursive: true, force: true }));

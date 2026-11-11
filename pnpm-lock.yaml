@@ -181,6 +181,9 @@ importers:
       '@plexus-ms/config':
         specifier: workspace:*
         version: link:packages/config
+      '@plexus-ms/dev':
+        specifier: workspace:*
+        version: link:packages/dev
       turbo:
         specifier: ^2.11.10
         version: 2.11.10
@@ -230,6 +233,25 @@ importers:
         version: 6.0.3
 
   packages/config: {}
+
+  packages/dev:
+    dependencies:
+      '@inquirer/prompts':
+        specifier: ^8.7.5
+        version: 8.7.5(@types/node@24.19.2)
+      '@plexus-ms/lib':
+        specifier: workspace:*
+        version: link:../lib
+      commander:
+        specifier: ^15.0.0
+        version: 15.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
 
   packages/lib:
     dependencies:

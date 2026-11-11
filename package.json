@@ -9,6 +9,7 @@
     "@biomejs/biome": "2.6.6",
     "@plexus-ms/cli": "workspace:*",
     "@plexus-ms/config": "workspace:*",
+    "@plexus-ms/dev": "workspace:*",
     "turbo": "^2.11.10"
   }
 }
