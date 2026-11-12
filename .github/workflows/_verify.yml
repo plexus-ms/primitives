@@ -374,6 +374,13 @@ jobs:
           REGISTRY_REGION: op://${{ env.VAULT }}/bucket-registry/region
           REGISTRY_ACCESS_KEY: op://${{ env.VAULT }}/bucket-registry/access-key-id
           REGISTRY_SECRET_KEY: op://${{ env.VAULT }}/bucket-registry/secret-access-key
+      # plx-ci test finds the candidate with crane, which reads the login
+      # docker writes below; into the job's home, as in plan.
+      - name: Install crane
+        if: ${{ inputs.registry == 'ghcr' }}
+        run: |
+          mkdir -p "$HOME/.local/bin" && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz -C "$HOME/.local/bin" crane
       - name: Log in to the forge's registry
         if: ${{ inputs.registry == 'ghcr' }}
         env:
@@ -385,7 +392,7 @@ jobs:
       # system libraries at the Playwright version the lockfile pins.
       - name: Install the app's dependencies and the browser
         run: |
-          corepack enable && pnpm install --frozen-lockfile --filter "./apps/${{ matrix.app }}..."
+          corepack enable && pnpm install --frozen-lockfile --filter "{./apps/${{ matrix.app }}}..."
           pnpm --filter "./apps/${{ matrix.app }}" exec playwright install --with-deps chromium
       - name: Test
         run: plx-ci test "${{ matrix.app }}" "${{ matrix.build }}" "${{ matrix.hash }}"

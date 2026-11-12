@@ -11,7 +11,7 @@
 // images live too: nothing to start, the job logs in, and crane and docker
 // reach it.
 import type { Context } from '@plexus-ms/lib';
-import { run } from '@plexus-ms/lib';
+import { ExecError, run } from '@plexus-ms/lib';
 import { sleep } from './exoscale.ts';
 import { type ObjectStorage, S3 } from './s3.ts';
 import type { RegistryKind } from './strategy.ts';
@@ -223,12 +223,17 @@ export function candidateRef(registry: Registry, app: string, tag: string): stri
     : `${imageName(registry.prefix, app)}:${tag}`;
 }
 
-/** Whether `ref` resolves on a registry crane is logged in to. */
+/**
+ * Whether `ref` resolves on a registry crane is logged in to. Only crane's
+ * own answer means absent: crane that cannot run is the job's fault, and
+ * reporting it as a missing image sends the reader after a build that ran.
+ */
 export async function craneDigest(ctx: Context, ref: string): Promise<string | undefined> {
   try {
     return (await ctx.read('crane', ['digest', ref])).trim() || undefined;
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (error instanceof ExecError) return undefined;
+    throw new Error(`crane could not run to look up ${ref}; is it installed in this job?`, { cause: error });
   }
 }
 

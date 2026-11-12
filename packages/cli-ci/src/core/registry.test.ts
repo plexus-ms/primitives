@@ -65,6 +65,16 @@ test('findTag answers with the ref that holds the tag: either sidecar, or the fo
   assert.equal(await findTag(new Context({}, ghcr), registry, 'website', 'build-y'), undefined);
 });
 
+test('crane that cannot run is an error, never a missing tag', async () => {
+  const missing = fakeIo({}, undefined, {
+    crane: () => {
+      throw Object.assign(new Error('spawn crane ENOENT'), { code: 'ENOENT' });
+    },
+  });
+  const registry = { kind: 'ghcr', prefix: 'ghcr.io/o' } as const;
+  await assert.rejects(findTag(new Context({}, missing), registry, 'website', 'build-x'), /crane could not run/);
+});
+
 test('a login is an entry for the host in the Docker config, or a credential store', async () => {
   const env = { DOCKER_CONFIG: '/cfg' };
   const config = (data: unknown) => new Context({}, fakeIo({ cfg: { 'config.json': JSON.stringify(data) } }));
