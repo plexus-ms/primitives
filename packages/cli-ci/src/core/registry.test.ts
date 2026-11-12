@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Context } from '@plexus-ms/lib';
-import { fakeIo } from '../testing/fakeIo.ts';
-import { candidateRef, findTag, imageName, loggedIn, registryOf, rotateBuckets, startSidecars } from './registry.ts';
+import { Context, ExecError } from '@plexus-ms/lib';
+import { fakeIo, notThere } from '../testing/fakeIo.ts';
+import {
+  candidateRef,
+  digestOf,
+  findTag,
+  imageName,
+  layersOf,
+  loggedIn,
+  registryOf,
+  rotateBuckets,
+  startSidecars,
+} from './registry.ts';
 
 const november = new Date('2026-11-06T12:00:00Z');
 
@@ -52,13 +62,15 @@ test('a candidate is written to this month’s sidecar, or to the forge’s regi
 });
 
 test('findTag answers with the ref that holds the tag: either sidecar, or the forge’s registry through crane', async () => {
-  const previous = fakeIo({}, undefined, { curl: (_cwd, args) => (args.at(-1)?.includes(':5001/') ? '200' : '404') });
+  const previous = fakeIo({}, undefined, {
+    curl: (_cwd, args) => (args.at(-1)?.includes(':5001/') ? '' : notThere('curl')),
+  });
   assert.equal(
     await findTag(new Context({}, previous), { kind: 'own' }, 'website', 'build-x'),
     'localhost:5001/website:build-x',
   );
   const ghcr = fakeIo({}, undefined, {
-    crane: (_cwd, args) => (args[1]?.endsWith(':build-x') ? 'sha256:a' : undefined),
+    crane: (_cwd, args) => (args[1]?.endsWith(':build-x') ? 'sha256:a' : notThere('crane')),
   });
   const registry = { kind: 'ghcr', prefix: 'ghcr.io/o' } as const;
   assert.equal(await findTag(new Context({}, ghcr), registry, 'website', 'build-x'), 'ghcr.io/o/website:build-x');
@@ -73,6 +85,62 @@ test('crane that cannot run is an error, never a missing tag', async () => {
   });
   const registry = { kind: 'ghcr', prefix: 'ghcr.io/o' } as const;
   await assert.rejects(findTag(new Context({}, missing), registry, 'website', 'build-x'), /crane could not run/);
+  await assert.rejects(layersOf(new Context({}, missing), registry, 'website', 'build-x'), /crane could not run/);
+});
+
+test('only the registry’s “not there” is a missing tag; a refused login or a silent sidecar is an error', async () => {
+  const ghcr = { kind: 'ghcr', prefix: 'ghcr.io/o' } as const;
+  const refused = fakeIo({}, undefined, {
+    crane: () => {
+      throw new ExecError(
+        'crane digest',
+        1,
+        'Error: GET https://ghcr.io/token: UNAUTHORIZED: authentication required\n',
+      );
+    },
+  });
+  await assert.rejects(
+    findTag(new Context({}, refused), ghcr, 'website', 'build-x'),
+    /could not look up ghcr.io\/o\/website:build-x: .*UNAUTHORIZED/s,
+  );
+
+  const down = (port: string) =>
+    fakeIo({}, undefined, {
+      curl: (_cwd, args) => {
+        if (args.at(-1)?.includes(`:${port}/`)) throw new ExecError('curl', 7, 'curl: (7) Failed to connect\n');
+        return notThere('curl');
+      },
+    });
+  await assert.rejects(
+    findTag(new Context({}, down('5000')), { kind: 'own' }, 'website', 'build-x'),
+    /could not look up localhost:5000\/website:build-x/,
+  );
+  await assert.rejects(
+    digestOf(new Context({}, down('5000')), { kind: 'own' }, 'website', 'build-x'),
+    /Failed to connect/,
+  );
+  // Last month's sidecar is optional: its silence is absence.
+  assert.equal(await findTag(new Context({}, down('5001')), { kind: 'own' }, 'website', 'build-x'), undefined);
+});
+
+test('under --dry-run a look-up that cannot be made is taken for absent, and said', async () => {
+  const io = fakeIo({}, undefined, {
+    crane: () => {
+      throw Object.assign(new Error('spawn crane ENOENT'), { code: 'ENOENT' });
+    },
+    curl: () => {
+      throw new ExecError('curl', 7, 'curl: (7) Failed to connect\n');
+    },
+  });
+  let said = '';
+  io.stderr.on('data', (chunk: Buffer) => {
+    said += chunk;
+  });
+  const dry = new Context({ dryRun: true }, io);
+  assert.equal(await findTag(dry, { kind: 'ghcr', prefix: 'ghcr.io/o' }, 'website', 'build-x'), undefined);
+  assert.equal(await findTag(dry, { kind: 'own' }, 'website', 'build-x'), undefined);
+  assert.match(said, /\[dry-run\] crane could not run to look up ghcr.io\/o\/website:build-x/);
+  assert.match(said, /\[dry-run\] could not look up localhost:5000\/website:build-x/);
 });
 
 test('a login is an entry for the host in the Docker config, or a credential store', async () => {
