@@ -80,16 +80,20 @@
         - Reload systemd
         - Restart the sysstat collect timer
 
+    # Older sysstat releases, Ubuntu 24.04's among them, ship no rotate timer.
+    - name: Look for the rotate timer
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/system/sysstat-rotate.timer
+      register: base_sysstat_rotate
+
     - name: Enable and start the collector and its timers
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         enabled: true
         state: started
-      loop:
-        - sysstat.service
-        - sysstat-collect.timer
-        - sysstat-summary.timer
-        - sysstat-rotate.timer
+      loop: >-
+        {{ ['sysstat.service', 'sysstat-collect.timer', 'sysstat-summary.timer']
+           + (['sysstat-rotate.timer'] if base_sysstat_rotate.stat.exists else []) }}
 
 - name: Harden the kernel configuration
   when: base_kernel_hardening
