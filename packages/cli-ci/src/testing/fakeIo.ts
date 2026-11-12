@@ -8,6 +8,13 @@ export type Tree = { [name: string]: string | Tree };
 
 export type FakeExec = (cwd: string, args: string[], input?: string) => string | undefined;
 
+/** What a registry answers for a manifest it does not hold, as curl --fail and crane report it. */
+export function notThere(command: 'curl' | 'crane'): never {
+  throw command === 'curl'
+    ? new ExecError('curl', 22, 'curl: (22) The requested URL returned error: 404\n')
+    : new ExecError('crane', 1, 'Error: GET https://ghcr.io/v2/o/a/manifests/t: MANIFEST_UNKNOWN: manifest unknown\n');
+}
+
 /** `git` answers git calls; `other` answers any other command, by name. */
 export function fakeIo(tree: Tree, git: FakeExec = () => undefined, other: Record<string, FakeExec> = {}): Io {
   const at = (path: string): Tree | string | undefined =>

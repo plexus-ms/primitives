@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Context } from '@plexus-ms/lib';
-import { fakeIo } from '../testing/fakeIo.ts';
+import { fakeIo, notThere } from '../testing/fakeIo.ts';
 import { deployLegsOf, environmentOf, hashesOf, legsOf, plan, readHashes, testLegsOf } from './plan.ts';
 
 const dryRun = JSON.stringify({
@@ -86,7 +86,7 @@ test('deployLegsOf: an app with a target deploys the commit’s image there, one
 test('the plan skips what the registry holds, per build and per test, and plans the deploys of an environment', async () => {
   // The pair holds website's build and nothing of vernier-app.
   const io = fakeIo({}, undefined, {
-    curl: (_cwd, args) => (args.at(-1)?.endsWith(':5000/v2/website/manifests/build-0f2a') ? '200' : '404'),
+    curl: (_cwd, args) => (args.at(-1)?.endsWith(':5000/v2/website/manifests/build-0f2a') ? '' : notThere('curl')),
   });
   const result = await plan(new Context({}, io), {
     apps: ['website', 'vernier-app'],
@@ -120,7 +120,7 @@ test('with the forge’s registry the look-up is crane’s, and without an envir
   const io = fakeIo({}, undefined, {
     crane: (_cwd, args) => {
       asked.push(args.join(' '));
-      return args[1]?.endsWith(':build-0f2a') ? 'sha256:abc' : undefined;
+      return args[1]?.endsWith(':build-0f2a') ? 'sha256:abc' : notThere('crane');
     },
   });
   const result = await plan(new Context({}, io), {

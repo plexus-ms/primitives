@@ -11,7 +11,7 @@
 // images live too: nothing to start, the job logs in, and crane and docker
 // reach it.
 import type { Context } from '@plexus-ms/lib';
-import { ExecError, run } from '@plexus-ms/lib';
+import { ExecError, orAbsent, run } from '@plexus-ms/lib';
 import { sleep } from './exoscale.ts';
 import { type ObjectStorage, S3 } from './s3.ts';
 import type { RegistryKind } from './strategy.ts';
@@ -145,49 +145,64 @@ export async function startSidecars(
   return { current: buckets.current, previous: buckets.previous, previousAnswers };
 }
 
-/** The HTTP status of a manifest HEAD against one sidecar, `000` when nothing answers. */
-async function manifestStatus(ctx: Context, port: number, app: string, tag: string): Promise<string> {
+/** curl's exit under --fail when the server answers 404: the one failure that means "not there". */
+export const curlNotFound = (error: ExecError): boolean => error.code === 22 && /\b404\b/.test(error.stderr);
+
+/** crane's answer that the registry holds no such manifest, or no such repository. */
+const craneNotFound = (error: ExecError): boolean => /MANIFEST_UNKNOWN|NAME_UNKNOWN|\b404\b/.test(error.stderr);
+
+/**
+ * One look-up of `ref`: the tool's output, or undefined when the registry
+ * says it holds no such thing (`absent` reads that off the failed command).
+ * Any other failure is an error: a tool that cannot run, a login the
+ * registry refuses or a sidecar that does not answer is the job's fault, and
+ * reporting it as a missing image sends the reader after a build that ran.
+ */
+async function lookUp(
+  ctx: Context,
+  ref: string,
+  command: string,
+  args: string[],
+  absent: (error: ExecError) => boolean,
+): Promise<string | undefined> {
   try {
-    return (
-      await ctx.read('curl', [
-        '-s',
-        '-o',
-        '/dev/null',
-        '-w',
-        '%{http_code}',
-        '-I',
-        '-H',
-        `Accept: ${ACCEPT}`,
-        `http://127.0.0.1:${port}/v2/${app}/manifests/${tag}`,
-      ])
-    ).trim();
-  } catch {
-    return '000';
+    return await orAbsent(ctx.read(command, args), absent);
+  } catch (error) {
+    const why =
+      error instanceof ExecError
+        ? `could not look up ${ref}: ${error.message}`
+        : `${command} could not run to look up ${ref}; is it installed in this job?`;
+    throw new Error(why, { cause: error });
   }
 }
 
-/** The port of the sidecar that holds `app:tag`, or undefined. */
+const manifestUrl = (port: number, app: string, tag: string): string =>
+  `http://127.0.0.1:${port}/v2/${app}/manifests/${tag}`;
+
+/** A manifest HEAD against one sidecar: its headers, or undefined where `absent` says so (a 404). */
+const head = (ctx: Context, port: number, app: string, tag: string, absent = curlNotFound) =>
+  lookUp(
+    ctx,
+    `localhost:${port}/${app}:${tag}`,
+    'curl',
+    ['-fsS', '-I', '-H', `Accept: ${ACCEPT}`, manifestUrl(port, app, tag)],
+    absent,
+  );
+
+/**
+ * The port of the sidecar that holds `app:tag`, or undefined. This month's
+ * sidecar has to answer; the previous month's is optional (see the top), so
+ * any failure there is absence.
+ */
 export async function tagExists(ctx: Context, app: string, tag: string): Promise<number | undefined> {
-  for (const port of [CURRENT_PORT, PREVIOUS_PORT]) {
-    if ((await manifestStatus(ctx, port, app, tag)) === '200') return port;
-  }
+  if ((await head(ctx, CURRENT_PORT, app, tag)) !== undefined) return CURRENT_PORT;
+  if ((await head(ctx, PREVIOUS_PORT, app, tag, () => true)) !== undefined) return PREVIOUS_PORT;
   return undefined;
 }
 
 /** The digest of `app:tag` on one sidecar, or undefined. */
 export async function digest(ctx: Context, app: string, tag: string, port = CURRENT_PORT): Promise<string | undefined> {
-  try {
-    const head = await ctx.read('curl', [
-      '-fsS',
-      '-I',
-      '-H',
-      `Accept: ${ACCEPT}`,
-      `http://127.0.0.1:${port}/v2/${app}/manifests/${tag}`,
-    ]);
-    return head.match(/^docker-content-digest:\s*(\S+)/im)?.[1];
-  } catch {
-    return undefined;
-  }
+  return (await head(ctx, port, app, tag))?.match(/^docker-content-digest:\s*(\S+)/im)?.[1];
 }
 
 export interface Layer {
@@ -202,19 +217,18 @@ export async function layers(
   tag: string,
   port = CURRENT_PORT,
 ): Promise<Layer[] | undefined> {
-  try {
-    const body = await ctx.read('curl', [
-      '-fsS',
-      '-H',
-      `Accept: ${ACCEPT}`,
-      `http://127.0.0.1:${port}/v2/${app}/manifests/${tag}`,
-    ]);
-    const data = JSON.parse(body) as { layers?: Layer[] };
-    return (data.layers ?? []).map((l) => ({ digest: l.digest, size: l.size }));
-  } catch {
-    return undefined;
-  }
+  const manifest = await lookUp(
+    ctx,
+    `localhost:${port}/${app}:${tag}`,
+    'curl',
+    ['-fsS', '-H', `Accept: ${ACCEPT}`, manifestUrl(port, app, tag)],
+    curlNotFound,
+  );
+  return manifest === undefined ? undefined : layersIn(manifest);
 }
+
+const layersIn = (manifest: string): Layer[] =>
+  ((JSON.parse(manifest) as { layers?: Layer[] }).layers ?? []).map((l) => ({ digest: l.digest, size: l.size }));
 
 /** Where a run writes `app:tag`: this month's sidecar, or the forge's registry. */
 export function candidateRef(registry: Registry, app: string, tag: string): string {
@@ -223,18 +237,9 @@ export function candidateRef(registry: Registry, app: string, tag: string): stri
     : `${imageName(registry.prefix, app)}:${tag}`;
 }
 
-/**
- * Whether `ref` resolves on a registry crane is logged in to. Only crane's
- * own answer means absent: crane that cannot run is the job's fault, and
- * reporting it as a missing image sends the reader after a build that ran.
- */
+/** The digest of `ref` on a registry crane is logged in to, or undefined when the registry holds no such manifest. */
 export async function craneDigest(ctx: Context, ref: string): Promise<string | undefined> {
-  try {
-    return (await ctx.read('crane', ['digest', ref])).trim() || undefined;
-  } catch (error) {
-    if (error instanceof ExecError) return undefined;
-    throw new Error(`crane could not run to look up ${ref}; is it installed in this job?`, { cause: error });
-  }
+  return (await lookUp(ctx, ref, 'crane', ['digest', ref], craneNotFound))?.trim() || undefined;
 }
 
 /** The ref under which the registry holds `app:tag`, either sidecar's under `own`, or undefined. */
@@ -260,14 +265,9 @@ export async function layersOf(
   tag: string,
 ): Promise<Layer[] | undefined> {
   if (registry.kind === 'own') return layers(ctx, app, tag);
-  try {
-    const data = JSON.parse(await ctx.read('crane', ['manifest', candidateRef(registry, app, tag)])) as {
-      layers?: Layer[];
-    };
-    return (data.layers ?? []).map((l) => ({ digest: l.digest, size: l.size }));
-  } catch {
-    return undefined;
-  }
+  const ref = candidateRef(registry, app, tag);
+  const manifest = await lookUp(ctx, ref, 'crane', ['manifest', ref], craneNotFound);
+  return manifest === undefined ? undefined : layersIn(manifest);
 }
 
 /**
