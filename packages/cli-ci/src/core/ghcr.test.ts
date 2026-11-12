@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Context } from '@plexus-ms/lib';
-import { fakeIo } from '../testing/fakeIo.ts';
+import { Context, ExecError } from '@plexus-ms/lib';
+import { fakeIo, notThere } from '../testing/fakeIo.ts';
 import { Packages, packageOf, prunable, prune, type Version } from './ghcr.ts';
 
 const now = new Date('2026-11-06T12:00:00Z');
@@ -47,7 +47,7 @@ test('prune takes the named packages only, skips one that does not exist, and de
         ]);
       if (url.includes('/container/web%2Fapp/'))
         return JSON.stringify([{ id: 3, created_at: recent, metadata: { container: { tags: ['test-5b05'] } } }]);
-      return undefined;
+      return notThere('curl');
     },
   });
   const ctx = new Context({}, io);
@@ -65,4 +65,14 @@ test('prune takes the named packages only, skips one that does not exist, and de
   const dry = new Context({ dryRun: true }, io);
   assert.equal((await prune(dry, new Packages(dry, 'damage-ms', 'ghp_x'), names, now)).length, 1);
   assert.ok(!calls.some((c) => c.startsWith('DELETE')));
+});
+
+test('a package API that refuses the token is an error, not a package that does not exist', async () => {
+  const io = fakeIo({}, undefined, {
+    curl: () => {
+      throw new ExecError('curl', 22, 'curl: (22) The requested URL returned error: 401\n');
+    },
+  });
+  const ctx = new Context({}, io);
+  await assert.rejects(prune(ctx, new Packages(ctx, 'damage-ms', 'ghp_x'), ['website'], now), /401/);
 });

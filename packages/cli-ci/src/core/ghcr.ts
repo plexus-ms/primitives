@@ -11,7 +11,8 @@
 // token deletes versions of the packages its repo published, which is why
 // the pruning is mounted in the app repo.
 import type { Context } from '@plexus-ms/lib';
-import { ExecError, run } from '@plexus-ms/lib';
+import { orAbsent, run } from '@plexus-ms/lib';
+import { curlNotFound } from './registry.ts';
 
 export interface Version {
   id: number;
@@ -103,11 +104,8 @@ export function packageOf(prefix: string, app: string): string {
 export async function prune(ctx: Context, packages: Packages, names: string[], now = new Date()): Promise<Pruned[]> {
   const pruned: Pruned[] = [];
   for (const name of names) {
-    let versions: Version[];
-    try {
-      versions = await packages.versions(name);
-    } catch (error) {
-      if (!(error instanceof ExecError)) throw error;
+    const versions = await orAbsent(packages.versions(name), curlNotFound);
+    if (versions === undefined) {
       ctx.say(`rotate: no package ${name} in ghcr.io/${packages.org}`);
       continue;
     }
