@@ -187,10 +187,20 @@ jobs:
           SELF_DELETE_KEY: op://${{ env.VAULT }}/exoscale/ci-selfdelete/key
           SELF_DELETE_SECRET: op://${{ env.VAULT }}/exoscale/ci-selfdelete/secret
           SMTP_HOST: op://${{ env.VAULT }}/smtp-relay/host
-          SMTP_PORT: op://${{ env.VAULT }}/smtp-relay/port
           SMTP_USER: op://${{ env.VAULT }}/smtp-relay/username
           SMTP_PASSWORD: op://${{ env.VAULT }}/smtp-relay/password
           MAIL_FROM: op://${{ env.VAULT }}/smtp-relay/from
+      # The relay's port is no secret, and load-secrets masks every value it
+      # loads: a 3-digit port turns up in a 16-digit content hash now and then,
+      # and a job output that holds a masked string is dropped (GitHub: "Skip
+      # output ... since it may contain secret"), so the plan's `tests` and
+      # `apps` would vanish and nothing would build. `op` is on the path from
+      # the step above; what it reads here is registered as no secret.
+      - name: Read the relay's port from the vault
+        if: ${{ inputs.strategy == 'hybrid' }}
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.op-service-account-token }}
+        run: echo "SMTP_PORT=$(op read "op://${VAULT}/smtp-relay/port")" >> "$GITHUB_ENV"
       # Into the job's home, not /usr/local: a small or medium slot of a runner
       # host (actions_runners) runs with no-new-privileges, so sudo is no option.
       - name: Install exo
