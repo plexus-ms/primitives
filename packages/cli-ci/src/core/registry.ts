@@ -157,6 +157,8 @@ const craneNotFound = (error: ExecError): boolean => /MANIFEST_UNKNOWN|NAME_UNKN
  * Any other failure is an error: a tool that cannot run, a login the
  * registry refuses or a sidecar that does not answer is the job's fault, and
  * reporting it as a missing image sends the reader after a build that ran.
+ * Under --dry-run the failure is narrated and taken for absent, so a preview
+ * runs where there is no crane, no login or no sidecar.
  */
 async function lookUp(
   ctx: Context,
@@ -172,7 +174,9 @@ async function lookUp(
       error instanceof ExecError
         ? `could not look up ${ref}: ${error.message}`
         : `${command} could not run to look up ${ref}; is it installed in this job?`;
-    throw new Error(why, { cause: error });
+    if (!ctx.dryRun) throw new Error(why, { cause: error });
+    ctx.say(`[dry-run] ${why.split('\n')[0]}; taken for absent`);
+    return undefined;
   }
 }
 

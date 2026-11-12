@@ -123,6 +123,26 @@ test('only the registry’s “not there” is a missing tag; a refused login or
   assert.equal(await findTag(new Context({}, down('5001')), { kind: 'own' }, 'website', 'build-x'), undefined);
 });
 
+test('under --dry-run a look-up that cannot be made is taken for absent, and said', async () => {
+  const io = fakeIo({}, undefined, {
+    crane: () => {
+      throw Object.assign(new Error('spawn crane ENOENT'), { code: 'ENOENT' });
+    },
+    curl: () => {
+      throw new ExecError('curl', 7, 'curl: (7) Failed to connect\n');
+    },
+  });
+  let said = '';
+  io.stderr.on('data', (chunk: Buffer) => {
+    said += chunk;
+  });
+  const dry = new Context({ dryRun: true }, io);
+  assert.equal(await findTag(dry, { kind: 'ghcr', prefix: 'ghcr.io/o' }, 'website', 'build-x'), undefined);
+  assert.equal(await findTag(dry, { kind: 'own' }, 'website', 'build-x'), undefined);
+  assert.match(said, /\[dry-run\] crane could not run to look up ghcr.io\/o\/website:build-x/);
+  assert.match(said, /\[dry-run\] could not look up localhost:5000\/website:build-x/);
+});
+
 test('a login is an entry for the host in the Docker config, or a credential store', async () => {
   const env = { DOCKER_CONFIG: '/cfg' };
   const config = (data: unknown) => new Context({}, fakeIo({ cfg: { 'config.json': JSON.stringify(data) } }));

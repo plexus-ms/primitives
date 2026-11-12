@@ -85,3 +85,15 @@ test('where the candidates live in the forge’s registry, the tested manifest o
   ]);
   await assert.rejects(publish(new Context({}, io(false)), options), /website:test-t1 is in no registry here/);
 });
+
+test('a dry run publishes where crane is missing, on a placeholder', async () => {
+  const io = fakeIo({}, undefined, {
+    crane: () => {
+      throw Object.assign(new Error('spawn crane ENOENT'), { code: 'ENOENT' });
+    },
+  });
+  const options = { app: 'website', build: 'b1', test: 't1', sha: 'deadbeef', prefix: 'ghcr.io/o' };
+  const dry = new Context({ dryRun: true }, io);
+  assert.equal((await publish(dry, { ...options, registry: { kind: 'ghcr', prefix: 'ghcr.io/o' } })).copied, false);
+  assert.equal((await publish(dry, { ...options, registry: own })).copied, true);
+});
