@@ -97,7 +97,8 @@
     }
   ],
   "lockFileMaintenance": {
-    "description": "The lock file moves within the ranges the manifests already accept, after the same three days; Renovate never groups it with other updates, so it is the second weekly pull request.",
+    "description": "The lock file moves within the ranges the manifests already accept; Renovate never groups it with other updates, so it is the second weekly pull request. pnpm keeps the three days when it resolves the lock file (pnpm-workspace.yaml); Renovate's own release-age check is off here, because the update has no release timestamp and would stay pending forever.",
+    "minimumReleaseAge": null,
     "automerge": true
   },
   "vulnerabilityAlerts": {
