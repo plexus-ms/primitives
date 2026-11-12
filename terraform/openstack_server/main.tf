@@ -40,6 +40,6 @@ resource "openstack_compute_instance_v2" "this" {
   metadata  = var.labels
 
   lifecycle {
-    ignore_changes = [user_data]
+    ignore_changes = [user_data, key_pair]
   }
 }

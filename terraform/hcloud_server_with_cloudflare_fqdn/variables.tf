@@ -15,9 +15,9 @@ variable "hcloud_server_type" {
 }
 
 variable "hcloud_server_image" {
-  description = "The Hetzner Cloud server image to use (e.g. 'ubuntu-24.04')"
+  description = "The Hetzner Cloud server image to use (e.g. 'debian-13')"
   type        = string
-  default     = "ubuntu-24.04"
+  default     = "debian-13"
 }
 
 variable "hcloud_server_location" {

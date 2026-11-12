@@ -8,7 +8,7 @@ This Terraform module is designed for the creation of a server on Hetzner Cloud 
 - Call the module with the variable inputs:
   - `cf_zone_name`: Specify the domain you'd like to use for the server's FQDN (mandatory).
   - `hostname`: Specify the hostname you'd like your server to have (mandatory).
-  - `hcloud_server_type`, `hcloud_server_image` and `hcloud_server_location`: Optional: Specify the desired server type, image to install, and datacenter location to use on Hetzner Cloud. If you leave out these three, they will default to `cx22` (2 vCPU, 4 GB RAM, 40 GB SSD, about €4/mo), `ubuntu-24.04` and `fsn-1` (Hetzner's Falkenstein location), respectively.
+  - `hcloud_server_type`, `hcloud_server_image` and `hcloud_server_location`: Optional: Specify the desired server type, image to install, and datacenter location to use on Hetzner Cloud. If you leave out these three, they will default to `cx22` (2 vCPU, 4 GB RAM, 40 GB SSD, about €4/mo), `debian-13` (Debian's current stable release, as PLX-Host requires) and `fsn-1` (Hetzner's Falkenstein location), respectively.
   - `timestamp`: Optional: Specify a timestamp that will be used in the comments of the created resources (useful for future you!!).
 
 ## Which DNS records will be created?
@@ -22,6 +22,9 @@ The module does not take SSH keys as input variables – SSH keys need to be upl
 
 Currently, this module is configured to add all SSH keys to the newly created server that are present in the Hetzner Cloud project (which is specified by the hcloud provider configuration and its token).
 If there are no SSH keys in the project, none will be added. (Hetzner's default behavior in this case is to send an email with the root password.)
+
+The project's keys are a root credential for bootstrapping only: the server ignores later changes to them, and to its image, so rotating or removing a key in the project never replaces the server.
+Access to a running server is managed by the roles from their first run on, not by the project's keys.
 
 ## Example use
 
@@ -55,7 +58,7 @@ module "my_hcloud_server" {
 
   hcloud_hostname        = "demo-server"
   hcloud_server_type     = "cx22"
-  hcloud_server_image    = "ubuntu-24.04"
+  hcloud_server_image    = "debian-13"
   hcloud_server_location = "fsn1"
 }
 

@@ -5,7 +5,14 @@ resource "hcloud_server" "my_server" {
   image        = var.hcloud_server_image
   server_type  = var.hcloud_server_type
   location     = var.hcloud_server_location
-  ssh_keys = data.hcloud_ssh_keys.all.ssh_keys.*.name
+  ssh_keys     = data.hcloud_ssh_keys.all.ssh_keys.*.name
+
+  # The keys and the image only matter when the server is created; the roles
+  # manage access from the first run on. Either one changing would otherwise
+  # replace the server.
+  lifecycle {
+    ignore_changes = [ssh_keys, image]
+  }
 }
 
 data "cloudflare_zone" "my_zone" {
