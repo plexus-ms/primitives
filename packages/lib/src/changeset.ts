@@ -29,7 +29,7 @@ import { dirname, join } from 'node:path';
 import { parse } from 'yaml';
 import type { Context } from './context.ts';
 import { type Plan, run, write } from './effects.ts';
-import { ExecError } from './io.ts';
+import { orAbsent } from './io.ts';
 
 export const CHANGESET_DIR = '.changeset';
 
@@ -198,14 +198,7 @@ export async function readChangeset(ctx: Context, dir: string, base: string, bra
   const git = (args: string[]) => ctx.read('git', args, { cwd: dir });
   const head = branch ?? (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
   const mergeBase = (await git(['merge-base', base, 'HEAD'])).trim();
-  const show = async (path: string): Promise<string | undefined> => {
-    try {
-      return await git(['show', `${mergeBase}:${path}`]);
-    } catch (error) {
-      if (error instanceof ExecError) return undefined;
-      throw error;
-    }
-  };
+  const show = (path: string): Promise<string | undefined> => orAbsent(git(['show', `${mergeBase}:${path}`]));
   const current = async (path: string): Promise<string | undefined> => {
     try {
       return await ctx.readFile(join(dir, path));

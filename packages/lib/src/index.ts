@@ -54,7 +54,7 @@ export {
 export { compareTrains, type Diagnosis, diagnose, type Report } from './doctor.ts';
 export { body, describe, type Plan, run, type Step, write } from './effects.ts';
 export { frontmatterField, setFrontmatterField } from './frontmatter.ts';
-export { type DirEntry, ExecError, type ExecOptions, type Io, realIo, render } from './io.ts';
+export { type DirEntry, ExecError, type ExecOptions, type Io, orAbsent, realIo, render } from './io.ts';
 export {
   buildManifest,
   catalogOf,

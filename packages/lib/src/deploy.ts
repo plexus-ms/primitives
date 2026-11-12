@@ -44,7 +44,7 @@ import { join } from 'node:path';
 import type { Context } from './context.ts';
 import { DEFAULT_ENVIRONMENT, deploymentSlug } from './deployTargets.ts';
 import { run } from './effects.ts';
-import { ExecError } from './io.ts';
+import { orAbsent } from './io.ts';
 import { UsageError } from './train.ts';
 
 export interface DeployOptions {
@@ -163,12 +163,8 @@ class Remote {
 
   /** A check on the host: whether the command succeeds, or undefined under --dry-run. */
   async test(command: string, show = false): Promise<boolean | undefined> {
-    try {
-      return (await this.read(command, show)) === undefined ? undefined : true;
-    } catch (error) {
-      if (error instanceof ExecError) return false;
-      throw error;
-    }
+    if (this.ctx.dryRun) return this.read(command, show).then(() => undefined);
+    return (await orAbsent(this.read(command, show))) !== undefined;
   }
 
   /** Close the shared connection; nothing to close when no call was made. */

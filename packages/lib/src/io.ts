@@ -53,6 +53,26 @@ export class ExecError extends Error {
   }
 }
 
+/**
+ * A read whose failure can be the answer "not there": undefined when it
+ * rejects with an ExecError that `absent` accepts, the error otherwise. By
+ * default any exit is that answer (`git show` of a path the commit lacks, a
+ * check on a host); a read whose tool fails for other reasons too (a registry
+ * that refuses the login, a sidecar that does not answer) names its own. A
+ * tool that could not start at all is never "not there".
+ */
+export async function orAbsent<T>(
+  read: Promise<T>,
+  absent: (error: ExecError) => boolean = () => true,
+): Promise<T | undefined> {
+  try {
+    return await read;
+  } catch (error) {
+    if (error instanceof ExecError && absent(error)) return undefined;
+    throw error;
+  }
+}
+
 /** True when a human is on both ends of the terminal. */
 export const isInteractive = (): boolean => process.stdin.isTTY === true && process.stderr.isTTY === true;
 
