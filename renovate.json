@@ -19,6 +19,14 @@
       "groupName": null,
       "schedule": ["at any time"],
       "automerge": false
+    },
+    {
+      "description": "The actions' patch, minor and digest updates still wait for a human, but arrive together once a week in a pull request of their own, the same morning as the weekly group; a major still comes on its own.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "groupName": "workflow actions",
+      "groupSlug": "weekly-actions",
+      "schedule": ["before 4am on monday"]
     }
   ]
 }
