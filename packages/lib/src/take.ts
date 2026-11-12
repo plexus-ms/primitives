@@ -256,7 +256,11 @@ async function syncSiteMarker(ctx: Context, site: Site, target: string): Promise
   await ctx.stage(write(join(target, MARKER_FILE), synced));
 }
 
-/** Refresh the lockfile when the updates touched a manifest (`mise exec` trusts the directory's own config). */
+/**
+ * Refresh the lockfile when the updates touched a manifest (`mise exec` trusts the directory's own config).
+ * The lockfile is what this step writes, so the install is never frozen: pnpm freezes it by default under CI,
+ * where the update workflow runs.
+ */
 async function refreshLockfile(ctx: Context, consumer: Consumer, dir: string, base: string, summary: Summary) {
   if ((await ctx.readFile(join(dir, 'pnpm-workspace.yaml')).catch(() => undefined)) === undefined) return;
   const manifests = ['*package.json', 'pnpm-workspace.yaml'];
@@ -267,7 +271,9 @@ async function refreshLockfile(ctx: Context, consumer: Consumer, dir: string, ba
   if (unchanged) return;
   ctx.say(`→ ${consumer.rel}: pnpm install (manifests changed)`);
   try {
-    await ctx.apply([run('mise', ['exec', '--', 'pnpm', 'install', '--reporter=silent'], { cwd: dir })]);
+    await ctx.apply([
+      run('mise', ['exec', '--', 'pnpm', 'install', '--no-frozen-lockfile', '--reporter=silent'], { cwd: dir }),
+    ]);
   } catch (error) {
     ctx.say(`  ✗ pnpm install failed${detail(error)}`);
     summary.failed.push(`${consumer.rel}/pnpm-lock.yaml`);

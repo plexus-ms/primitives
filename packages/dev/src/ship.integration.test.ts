@@ -698,6 +698,10 @@ test('propagate: every repo under the directory takes the train in a worktree of
     'develop untouched',
   );
   assert.equal(fakeLog().filter((l) => l.startsWith('mise exec -- pnpm install')).length, 1, 'lockfile refreshed once');
+  assert.ok(
+    fakeLog().some((l) => l.startsWith('mise exec -- pnpm install --no-frozen-lockfile')),
+    'the refresh is never frozen, though pnpm freezes by default under CI',
+  );
   assert.equal(pull('acme-web', '0.2.0'), 'https://forge/acme-web/pull/1');
   assert.equal(pull('acme-web', '0.2.0', '.base'), 'develop');
   assert.equal(pull('acme-platform', '0.2.0', '.base'), 'main');
